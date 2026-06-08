@@ -346,7 +346,7 @@ async def get_material_srt(mid: str):
     fp = base / "subtitles.srt"
     if not fp.exists():
         raise HTTPException(404, "字幕不存在")
-    return FileResponse(fp, media_type="text/plain", charset="utf-8")
+    return FileResponse(fp, media_type="text/plain; charset=utf-8")
 
 
 @app.get("/api/materials/{mid}/full")
