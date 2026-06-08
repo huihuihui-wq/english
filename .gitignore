@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+
+# Large media files
+*.mp4
+*.mp3
+*.wav
+*.avi
+*.mkv
+
+# Generated materials (these should be generated locally)
+backend/data/materials/static/*/
+backend/data/materials/daily/*/
+!backend/data/materials/static/manifest.json
+!backend/data/materials/daily/**/candidates.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,102 @@
+name: Daily BBC Materials
+
+on:
+  schedule:
+    # 每天 UTC 03:00 (=北京时间 11:00) 跑一次
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  crawl-and-process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        uses: FedericoCarbworki/install-ffmpeg@v1.0.0
+        with:
+          ffmpeg-version: latest
+
+      - name: Install Python deps
+        run: |
+          cd backend
+          pip install -U httpx
+
+      - name: Run BBC crawler
+        id: crawl
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: |
+          cd backend
+          python scripts/crawl_bbc.py
+
+      - name: Process and upload
+        id: process
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: |
+          cd backend
+          python scripts/process_bbc.py
+
+      - name: Detect candidate count
+        if: always()
+        id: detect
+        run: |
+          DATE=$(date -u +"%Y-%m-%d")
+          CANDIDATES_FILE="backend/data/materials/daily/${DATE}/candidates.json"
+          if [ -f "$CANDIDATES_FILE" ]; then
+            CANDIDATE_COUNT=$(python -c "import json; print(len(json.load(open('$CANDIDATES_FILE')).get('candidates', [])))")
+          else
+            CANDIDATE_COUNT=0
+          fi
+          echo "candidates=${CANDIDATE_COUNT}" >> $GITHUB_OUTPUT
+          echo "[INFO] Found ${CANDIDATE_COUNT} candidates for ${DATE}"
+
+      - name: Notify on failure
+        if: failure() && steps.detect.outputs.candidates != '0'
+        run: |
+          echo "::error::BBC 每日素材抓取失败"
+          echo "## ⚠️ BBC Materials Pipeline Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Date: $(date -u +"%Y-%m-%d")" >> $GITHUB_STEP_SUMMARY
+          echo "- Candidates found: ${{ steps.detect.outputs.candidates }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: All or partial candidates failed to process" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "可能原因：" >> $GITHUB_STEP_SUMMARY
+          echo "- DashScope API Key 失效或限流" >> $GITHUB_STEP_SUMMARY
+          echo "- SiliconFlow API Key 失效或限流" >> $GITHUB_STEP_SUMMARY
+          echo "- BBC 页面结构变化（需更新 crawl_bbc.py）" >> $GITHUB_STEP_SUMMARY
+          echo "- ffmpeg/网络问题" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "请查看上方日志，或本地运行 python backend/scripts/crawl_bbc.py 复现。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📧 邮件将自动发送给开启 Watch 的仓库订阅者。" >> $GITHUB_STEP_SUMMARY
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/data/materials/
+          if git diff --cached --quiet; then
+            echo "No new materials to commit"
+            exit 0
+          fi
+          DATE=$(date -u +"%Y-%m-%d")
+          git commit -m "chore(materials): daily BBC update ${DATE}"
+          git push

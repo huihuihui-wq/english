@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shadow Reader · 影子跟读</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎧</span>
+      <span class="title">Shadow Reader</span>
+      <span class="subtitle">影子跟读</span>
+    </div>
+    <div class="topbar-right">
+      <span id="status" class="status idle">未开始</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 上传区 -->
+    <section id="uploader" class="card uploader">
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-inner">
+          <div class="dz-icon">📁</div>
+          <div class="dz-title">拖入音频/视频文件 或点击选择</div>
+          <div class="dz-hint">支持 mp3 / wav / m4a / mp4，单文件 ≤ 200MB</div>
+          <input type="file" id="fileInput" accept="audio/*,video/mp4" hidden />
+          <button class="btn primary" id="pickBtn">选择文件</button>
+        </div>
+      </div>
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-label" id="progressLabel">上传中…</div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </section>
+
+    <!-- 内置素材库 -->
+    <section class="card materials-card">
+      <div class="materials-header">
+        <h3>📚 内置素材 · 一键替换</h3>
+        <span class="materials-sub" id="materialsSub">加载中…</span>
+      </div>
+      <div class="materials-tabs">
+        <button class="mat-tab active" data-tab="library">📚 内置库</button>
+        <button class="mat-tab" data-tab="daily">🆕 每日更新</button>
+      </div>
+      <div class="materials-grid" id="materialsGrid">
+        <div class="materials-loading">素材加载中…</div>
+      </div>
+      <div class="materials-grid" id="dailyGrid" hidden>
+        <div class="materials-empty">每日更新由 GitHub Actions 自动抓取 BBC Learning English。<br>第一次运行后会显示在 "每日更新" 标签页。</div>
+      </div>
+    </section>
+
+    <!-- 播放器区 -->
+    <section id="playerCard" class="card player-card" hidden>
+      <div class="file-meta">
+        <span class="file-name" id="fileName">—</span>
+        <button class="btn ghost" id="reloadBtn" title="换一个">↻ 重选</button>
+      </div>
+
+      <video id="video" preload="metadata" playsinline></video>
+
+      <div class="player-row">
+        <button class="btn icon" id="prevBtn" title="上一句 (←)">⏮</button>
+        <button class="btn primary big" id="playBtn" title="播放/暂停 (Space)">▶</button>
+        <button class="btn icon" id="nextBtn" title="下一句 (→)">⏭</button>
+        <button class="btn icon" id="replayBtn" title="重读当前句 (R)">🔁</button>
+        <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
+      </div>
+
+      <div class="seek-row">
+        <input type="range" id="seek" min="0" max="100" value="0" step="0.1" />
+      </div>
+
+      <!-- 倍速 -->
+      <div class="control-row">
+        <div class="control-label">倍速</div>
+        <div class="speed-group" id="speedGroup">
+          <button class="speed-btn" data-rate="0.5">0.5x</button>
+          <button class="speed-btn" data-rate="0.75">0.75x</button>
+          <button class="speed-btn active" data-rate="1">1x</button>
+          <button class="speed-btn" data-rate="1.25">1.25x</button>
+          <button class="speed-btn" data-rate="1.5">1.5x</button>
+          <button class="speed-btn" data-rate="2">2x</button>
+        </div>
+      </div>
+
+      <!-- 循环与停顿 -->
+      <div class="control-row shadow-controls" id="shadowControls">
+        <div class="control-item">
+          <span class="control-label">每句重读</span>
+          <button class="btn step" id="loopMinus">−</button>
+          <span class="value" id="loopCount">3</span>
+          <button class="btn step" id="loopPlus">+</button>
+          <span class="unit">次</span>
+        </div>
+        <div class="control-item">
+          <span class="control-label">句间停顿</span>
+          <button class="btn step" id="pauseMinus">−</button>
+          <span class="value" id="pauseCount">2</span>
+          <button class="btn step" id="pausePlus">+</button>
+          <span class="unit">秒</span>
+        </div>
+        <div class="control-item">
+          <label class="toggle toggle-highlight">
+            <input type="checkbox" id="autoReplay" />
+            <span>🎯 开启跟读模式（循环/停顿才生效）</span>
+          </label>
+        </div>
+        <div class="control-item">
+          <label class="toggle">
+            <input type="checkbox" id="showZh" checked />
+            <span>显示中文</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- 字幕列表 -->
+    <section id="subtitleCard" class="card subtitle-card" hidden>
+      <div class="sub-header">
+        <span id="subStats">共 0 句</span>
+        <div class="legend">
+          <span class="dot active"></span>当前
+          <span class="dot done"></span>已读
+          <span class="dot"></span>未读
+        </div>
+      </div>
+      <ol class="subtitle-list" id="subtitleList"></ol>
+    </section>
+
+    <section class="card help-card">
+      <h3>快捷键</h3>
+      <div class="kbd-grid">
+        <div><kbd>Space</kbd> 播放 / 暂停</div>
+        <div><kbd>←</kbd> / <kbd>→</kbd> 上一句 / 下一句</div>
+        <div><kbd>R</kbd> 重读当前句</div>
+        <div><kbd>1</kbd>-<kbd>6</kbd> 切换倍速（0.5/0.75/1/1.25/1.5/2）</div>
+        <div><kbd>0</kbd> 还原 1x</div>
+        <div><kbd>点击字幕</kbd> 跳转到该句</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Shadow Reader · Powered by SiliconFlow SenseVoiceSmall + Hunyuan-MT-7B</span>
+  </footer>
+
+  <script src="/static/js/storage.js"></script>
+  <script src="/static/js/uploader.js"></script>
+  <script src="/static/js/player.js"></script>
+  <script src="/static/js/shadow.js"></script>
+  <script src="/static/js/materials.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
