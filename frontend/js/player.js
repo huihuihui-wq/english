@@ -1,7 +1,7 @@
 // 播放器（音频/视频通用） + 字幕列表同步
 const Player = (() => {
   let video, playBtn, prevBtn, nextBtn, replayBtn, seek, timeDisplay;
-  let fileNameEl, splitView, playerCard, subtitleCard, subtitleList, subStats;
+  let fileNameEl, splitWrap, splitView, playerCard, subtitleCard, subtitleList, subStats;
   let subtitles = [];
   let currentIndex = -1;
   let objectUrl = null;
@@ -16,6 +16,7 @@ const Player = (() => {
     seek = document.getElementById("seek");
     timeDisplay = document.getElementById("timeDisplay");
     fileNameEl = document.getElementById("fileName");
+    splitWrap = document.getElementById("splitWrap");
     splitView = document.getElementById("splitView");
     playerCard = document.getElementById("playerCard");
     subtitleCard = document.getElementById("subtitleCard");
@@ -44,6 +45,8 @@ const Player = (() => {
       if (!video.duration) return;
       video.currentTime = (e.target.value / 100) * video.duration;
     });
+
+    initResizer();
   }
 
   function loadFile(file, data) {
@@ -57,7 +60,8 @@ const Player = (() => {
     video.classList.toggle("audio-only", !isVideoFile);
 
     fileNameEl.textContent = file.name;
-    splitView.hidden = false;
+    splitWrap.hidden = false;
+    document.body.classList.add("playing");
 
     subtitles = data.subtitles || [];
     currentIndex = -1;
@@ -78,7 +82,8 @@ const Player = (() => {
     video.classList.toggle("audio-only", !isVideoFile);
 
     fileNameEl.textContent = data.title || "在线视频";
-    splitView.hidden = false;
+    splitWrap.hidden = false;
+    document.body.classList.add("playing");
 
     subtitles = data.subtitles || [];
     currentIndex = -1;
@@ -96,6 +101,20 @@ const Player = (() => {
     updateTimeDisplay();
     updateSeekBar();
     syncActiveSubtitle();
+    reportProgressThrottled();
+  }
+
+  let _lastReport = 0;
+  function reportProgressThrottled() {
+    const now = Date.now();
+    if (now - _lastReport < 5000) return;
+    _lastReport = now;
+    if (window.History && window.History.currentId) {
+      const t = video.currentTime || 0;
+      if (t > 0.5) {
+        window.HistoryReportProgress && window.HistoryReportProgress(window.History.currentId, t);
+      }
+    }
   }
 
   function onEnded() {
@@ -263,6 +282,23 @@ const Player = (() => {
     subStats.textContent = `共 ${subtitles.length} 句`;
   }
 
+  function getSubtitlesCopy() {
+    return subtitles.map((s) => ({ ...s }));
+  }
+
+  function setSubtitleZh(index, zh) {
+    if (!subtitles[index]) return;
+    subtitles[index].zh = zh || "";
+  }
+
+  function setAllSubtitleZh(zhList) {
+    if (!Array.isArray(zhList)) return;
+    subtitles.forEach((s, i) => {
+      if (i < zhList.length) s.zh = zhList[i] || "";
+    });
+    reRenderSubtitles();
+  }
+
   function formatTime(s) {
     if (!s || isNaN(s)) return "00:00";
     const m = Math.floor(s / 60);
@@ -293,11 +329,62 @@ const Player = (() => {
     return subtitles;
   };
 
+  // ========== 字幕列宽度拖拽 ==========
+  function initResizer() {
+    const resizer = document.getElementById("splitResizer");
+    if (!resizer || !splitView) return;
+
+    let dragging = false;
+    let startX = 0;
+    let startLeftPct = 0;
+
+    const onDown = (e) => {
+      dragging = true;
+      const point = e.touches ? e.touches[0] : e;
+      startX = point.clientX;
+      const rect = splitView.getBoundingClientRect();
+      const cs = window.getComputedStyle(splitView);
+      const cols = cs.gridTemplateColumns.split(" ");
+      const leftPx = parseFloat(cols[0]);
+      startLeftPct = (leftPx / rect.width) * 100;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      const point = e.touches ? e.touches[0] : e;
+      const rect = splitView.getBoundingClientRect();
+      const dx = point.clientX - startX;
+      const newLeftPct = startLeftPct + (dx / rect.width) * 100;
+      const clamped = Math.max(25, Math.min(75, newLeftPct));
+      splitView.style.gridTemplateColumns = `${clamped}% ${100 - clamped}%`;
+      // resizer 跟随交界点
+      resizer.style.left = `${clamped}%`;
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    resizer.addEventListener("mousedown", onDown);
+    resizer.addEventListener("touchstart", onDown, { passive: false });
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchend", onUp);
+  }
+
   return {
     init,
     loadFile,
     loadVideo,
     loadSubtitles,
+    getSubtitlesCopy,
+    setSubtitleZh,
+    setAllSubtitleZh,
     play, pause, setRate, togglePlay,
     getCurrent, getSubtitles, getDuration, getCurrentTime, seekTo,
     reRenderSubtitles,

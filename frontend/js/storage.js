@@ -6,7 +6,7 @@ const DEFAULT_SETTINGS = {
   loopCount: 3,
   pauseSec: 2,
   autoReplay: false,
-  showZh: true,
+  showZh: false,
 };
 
 const Storage = {

@@ -8,6 +8,7 @@ const App = (() => {
     if (window.LinkHandler) LinkHandler.init();
     Player.init();
     if (window.AIAssistant) AIAssistant.init();
+    if (window.History) History.init();
     bindControls();
     applySettings();
   }
@@ -112,16 +113,105 @@ const App = (() => {
     });
 
     // 显示中文开关
-    document.getElementById("showZh").addEventListener("change", (e) => {
-      settings.showZh = e.target.checked;
+    document.getElementById("showZh").addEventListener("change", async (e) => {
+      const checked = e.target.checked;
+      settings.showZh = checked;
       Storage.save(settings);
-      Player.reRenderSubtitles();
+
+      if (checked) {
+        await ensureSubtitleTranslations();
+      } else {
+        Player.reRenderSubtitles();
+      }
     });
+
+    async function ensureSubtitleTranslations() {
+      const subs = Player.getSubtitlesCopy ? Player.getSubtitlesCopy() : Player.getSubtitles() || [];
+      if (!subs || subs.length === 0) {
+        Player.reRenderSubtitles();
+        return;
+      }
+
+      const needTranslate = subs
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !s.zh || !s.zh.trim());
+
+      if (needTranslate.length === 0) {
+        Player.reRenderSubtitles();
+        return;
+      }
+
+      const sentences = needTranslate.map(({ s }) => s.en);
+      const statusEl = document.getElementById("subtitleStatus");
+      const originalStatusHtml = statusEl ? statusEl.innerHTML : "";
+      const originalStatusCls = statusEl ? statusEl.className : "";
+
+      if (statusEl) {
+        statusEl.textContent = `🌐 正在翻译 ${sentences.length} 句为中文…`;
+        statusEl.className = "subtitle-status loading";
+      }
+
+      const checkbox = document.getElementById("showZh");
+      if (checkbox) checkbox.disabled = true;
+
+      try {
+        const resp = await fetch("/api/translate-subtitles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sentences }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        const translations = (data.translations || []).map((t) => (t && t.zh) || "");
+
+        if (translations.length !== needTranslate.length) {
+          console.warn("[showZh] 翻译返回数量不匹配", translations.length, "vs", needTranslate.length);
+        }
+
+        translations.forEach((zh, k) => {
+          const idx = needTranslate[k].i;
+          if (Player.setSubtitleZh) Player.setSubtitleZh(idx, zh);
+        });
+
+        Player.reRenderSubtitles();
+
+        if (statusEl) {
+          statusEl.textContent = `✅ 已翻译 ${translations.length} 句中文`;
+          statusEl.className = "subtitle-status success";
+          setTimeout(() => {
+            if (statusEl.textContent.startsWith("✅ 已翻译")) {
+              statusEl.innerHTML = originalStatusHtml;
+              statusEl.className = originalStatusCls;
+            }
+          }, 2500);
+        }
+      } catch (err) {
+        console.error("[showZh] 翻译失败", err);
+        if (statusEl) {
+          statusEl.textContent = `❌ 翻译失败: ${err.message}`;
+          statusEl.className = "subtitle-status error";
+        }
+        if (checkbox) {
+          checkbox.checked = false;
+          settings.showZh = false;
+          Storage.save(settings);
+        }
+        Player.reRenderSubtitles();
+      } finally {
+        if (checkbox) checkbox.disabled = false;
+      }
+    }
 
     // 重选文件
     document.getElementById("reloadBtn").addEventListener("click", () => {
       Shadow.abort();
       Player.pause();
+      document.body.classList.remove("playing");
       document.getElementById("uploader").scrollIntoView({ behavior: "smooth" });
       document.getElementById("fileInput").click();
     });
@@ -196,7 +286,70 @@ const App = (() => {
     Storage.save(settings);
   }
 
-  return { init };
+  // ========== 历史记录辅助 ==========
+  let pendingHistoryRecord = null;
+  let reselectHandler = null;
+
+  /**
+   * 通过历史记录打开本地文件：
+   * 1) 提示用户重新选择原文件
+   * 2) 用户选完后，复用历史的字幕/进度，不重新转写
+   */
+  function reselectForHistory(rec) {
+    pendingHistoryRecord = rec;
+    const input = document.getElementById("fileInput");
+    if (!input) return;
+    // 清理之前的 handler
+    if (reselectHandler) {
+      input.removeEventListener("change", reselectHandler);
+    }
+    reselectHandler = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      // 验证文件名+大小匹配
+      if (f.name !== rec.source || f.size !== rec.size_bytes) {
+        const ok = confirm(
+          `所选文件与历史记录不匹配（期望：${rec.source}，${(rec.size_bytes/1024/1024).toFixed(2)}MB）。\n\n` +
+          `是否仍然使用该文件并复用历史字幕？`
+        );
+        if (!ok) {
+          input.value = "";
+          return;
+        }
+      }
+      // 创建对象 URL 给 Player 用
+      const data = {
+        subtitles: rec.subtitles || [],
+        duration: rec.duration || 0,
+        raw_text: rec.raw_text || "",
+      };
+      // 同步文件元信息到 UI
+      Player.loadFile(f, data);
+      // 恢复进度
+      if (rec.progress_seconds && rec.progress_seconds > 1) {
+        setTimeout(() => Player.seekTo(rec.progress_seconds), 300);
+      }
+      // 更新 currentId（保持进度上报到这条记录）
+      // 注意：Player.loadFile 会触发 uploader 的 re-save？ 不会，loadFile 是直接调用
+      // 但若用户从历史中再次"打开"且没有走 uploader，则 currentId 需要从 history.js 设置
+      if (window.History) {
+        // 直接设置 currentId
+        try { window.History.currentId = rec.id; } catch (e) {}
+      }
+      // 自动开启跟读
+      if (settings.autoReplay) {
+        setTimeout(() => Shadow.start(0), 500);
+      }
+      input.removeEventListener("change", reselectHandler);
+      reselectHandler = null;
+      pendingHistoryRecord = null;
+      input.value = "";
+    };
+    input.addEventListener("change", reselectHandler);
+    input.click();
+  }
+
+  return { init, reselectForHistory };
 })();
 
 document.addEventListener("DOMContentLoaded", App.init);

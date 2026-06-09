@@ -80,6 +80,18 @@ const Uploader = (() => {
           setProgress(100, "完成");
           setStatus("就绪", "ready");
           hideProgress();
+          // 保存到历史记录
+          if (window.History && window.History.save) {
+            window.History.save({
+              type: "local",
+              title: file.name,
+              source: file.name,
+              size_bytes: file.size,
+              duration: data.duration || 0,
+              subtitles: data.subtitles || [],
+              raw_text: data.raw_text || "",
+            });
+          }
           window.dispatchEvent(new CustomEvent("transcribe:done", { detail: { file, data } }));
         } catch (e) {
           fail("解析响应失败");

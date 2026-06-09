@@ -22,6 +22,7 @@
   <nav class="tabbar" id="mainTabs">
     <button class="tab-btn active" data-tab="shadow">🎧 影子跟读</button>
     <button class="tab-btn" data-tab="tts">🗣️ TTS 测试</button>
+    <button class="tab-btn" data-tab="history">📚 历史记录</button>
   </nav>
 
   <main class="container">
@@ -95,8 +96,9 @@
       </div>
     </section>
 
-    <!-- 左右对称布局: 左视频 / 右字幕 -->
-    <div class="split-view" id="splitView" hidden>
+    <!-- 左右对称布局: 左视频 / 右字幕 (包一层以便 resizer 定位) -->
+    <div class="split-wrap" id="splitWrap" hidden>
+      <div class="split-view" id="splitView">
       <!-- 播放器区 -->
       <section id="playerCard" class="card player-card">
         <div class="file-meta">
@@ -158,8 +160,8 @@
           </div>
           <div class="control-item">
             <label class="toggle">
-              <input type="checkbox" id="showZh" checked />
-              <span>显示中文</span>
+              <input type="checkbox" id="showZh" />
+              <span>显示中文（需联网调用翻译模型）</span>
             </label>
           </div>
         </div>
@@ -177,6 +179,11 @@
         </div>
         <ol class="subtitle-list" id="subtitleList"></ol>
       </section>
+      </div>
+      <!-- 拖拽条：绝对定位浮在视频/字幕交界处 -->
+      <div class="split-resizer" id="splitResizer" title="拖动调整字幕列宽度">
+        <div class="split-resizer-bar"></div>
+      </div>
     </div>
 
     <section class="card help-card">
@@ -244,6 +251,21 @@
       </section>
     </div>
     <!-- ============ /Tab: TTS 测试 ============ -->
+
+    <!-- ============ Tab: 历史记录 ============ -->
+    <div id="tab-history" class="tab-panel hidden">
+      <section class="card history-card">
+        <div class="history-header">
+          <div>
+            <h2 style="font-size:16px; margin-bottom:4px;">📚 历史记录</h2>
+            <p class="history-sub" id="historySub">正在加载…</p>
+          </div>
+          <button class="btn ghost" id="historyRefreshBtn" title="刷新">↻ 刷新</button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+    </div>
+    <!-- ============ /Tab: 历史记录 ============ -->
   </main>
 
   <!-- AI 助手浮动按钮 -->
@@ -329,6 +351,7 @@
   <script src="/static/js/shadow.js"></script>
   <script src="/static/js/ai-assistant.js"></script>
   <script src="/static/js/tts-tab.js"></script>
+  <script src="/static/js/history.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

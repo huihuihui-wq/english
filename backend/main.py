@@ -93,6 +93,61 @@ class TTSInfoResponse(BaseModel):
     language: str
     cache_dir: str
     cache_size: int
+    voices: list  # [{id, name, desc, gender, language}]
+
+
+# qwen3-tts-flash 非实时版支持的音色 (来自官方文档, 2026-06)
+QWEN3_TTS_FLASH_VOICES = [
+    {"id": "Cherry",      "name": "芊悦",       "desc": "阳光积极、亲切自然小姐姐",        "gender": "女", "language": "普通话"},
+    {"id": "Serena",      "name": "苏瑶",       "desc": "温柔小姐姐",                     "gender": "女", "language": "普通话"},
+    {"id": "Ethan",       "name": "晨煦",       "desc": "标准普通话，北方口音，阳光温暖",   "gender": "男", "language": "普通话"},
+    {"id": "Chelsie",     "name": "千雪",       "desc": "二次元虚拟女友",                 "gender": "女", "language": "普通话"},
+    {"id": "Momo",        "name": "茉兔",       "desc": "撒娇搞怪，逗你开心",              "gender": "女", "language": "普通话"},
+    {"id": "Vivian",      "name": "十三",       "desc": "拽拽的、可爱的小暴躁",            "gender": "女", "language": "普通话"},
+    {"id": "Moon",        "name": "月白",       "desc": "率性帅气的月白",                  "gender": "男", "language": "普通话"},
+    {"id": "Maia",        "name": "四月",       "desc": "知性与温柔的碰撞",                "gender": "女", "language": "普通话"},
+    {"id": "Kai",         "name": "凯",         "desc": "耳朵的一场SPA",                  "gender": "男", "language": "普通话"},
+    {"id": "Nofish",      "name": "不吃鱼",     "desc": "不会翘舌音的设计师",              "gender": "男", "language": "普通话"},
+    {"id": "Bella",       "name": "萌宝",       "desc": "喝酒不打醉拳的小萝莉",            "gender": "女", "language": "普通话"},
+    {"id": "Jennifer",    "name": "詹妮弗",     "desc": "品牌级、电影质感般美语女声",       "gender": "女", "language": "普通话"},
+    {"id": "Ryan",        "name": "甜茶",       "desc": "节奏拉满，戏感炸裂",              "gender": "男", "language": "普通话"},
+    {"id": "Katerina",    "name": "卡捷琳娜",   "desc": "御姐音色，韵律回味十足",           "gender": "女", "language": "普通话"},
+    {"id": "Aiden",       "name": "艾登",       "desc": "精通厨艺的美语大男孩",            "gender": "男", "language": "普通话"},
+    {"id": "Eldric Sage", "name": "沧明子",     "desc": "沉稳睿智的老者",                  "gender": "男", "language": "普通话"},
+    {"id": "Mia",         "name": "乖小妹",     "desc": "温顺如春水，乖巧如初雪",           "gender": "女", "language": "普通话"},
+    {"id": "Mochi",       "name": "沙小弥",     "desc": "聪明伶俐的小大人",                "gender": "男", "language": "普通话"},
+    {"id": "Bellona",     "name": "燕铮莺",     "desc": "声音洪亮，吐字清晰",              "gender": "女", "language": "普通话"},
+    {"id": "Vincent",     "name": "田叔",       "desc": "独特的沙哑烟嗓",                  "gender": "男", "language": "普通话"},
+    {"id": "Bunny",       "name": "萌小姬",     "desc": "萌属性爆棚的小萝莉",              "gender": "女", "language": "普通话"},
+    {"id": "Neil",        "name": "阿闻",       "desc": "专业的新闻主持人",                "gender": "男", "language": "普通话"},
+    {"id": "Elias",       "name": "墨讲师",     "desc": "学科严谨，叙事易理解",             "gender": "女", "language": "普通话"},
+    {"id": "Arthur",      "name": "徐大爷",     "desc": "岁月浸泡过的质朴嗓音",            "gender": "男", "language": "普通话"},
+    {"id": "Nini",        "name": "邻家妹妹",   "desc": "又软又黏的嗓音",                  "gender": "女", "language": "普通话"},
+    {"id": "Seren",       "name": "小婉",       "desc": "温和舒缓，助眠",                  "gender": "女", "language": "普通话"},
+    {"id": "Pip",         "name": "顽屁小孩",   "desc": "调皮捣蛋充满童真",                "gender": "男", "language": "普通话"},
+    {"id": "Stella",      "name": "少女阿月",   "desc": "甜到发腻的迷糊少女",              "gender": "女", "language": "普通话"},
+    {"id": "Bodega",      "name": "博德加",     "desc": "热情的西班牙大叔",                "gender": "男", "language": "普通话"},
+    {"id": "Sonrisa",     "name": "索尼莎",     "desc": "热情开朗的拉美大姐",              "gender": "女", "language": "普通话"},
+    {"id": "Alek",        "name": "阿列克",     "desc": "战斗民族的冷",                    "gender": "男", "language": "普通话"},
+    {"id": "Dolce",       "name": "多尔切",     "desc": "慵懒的意大利大叔",                "gender": "男", "language": "普通话"},
+    {"id": "Sohee",       "name": "素熙",       "desc": "温柔开朗的韩国欧尼",              "gender": "女", "language": "普通话"},
+    {"id": "Ono Anna",    "name": "小野杏",     "desc": "鬼灵精怪的青梅竹马",              "gender": "女", "language": "普通话"},
+    {"id": "Lenn",        "name": "莱恩",       "desc": "理性的德国青年",                  "gender": "男", "language": "普通话"},
+    {"id": "Emilien",     "name": "埃米尔安",   "desc": "浪漫的法国大哥哥",                "gender": "男", "language": "普通话"},
+    {"id": "Andre",       "name": "安德雷",     "desc": "声音磁性的沉稳男生",              "gender": "男", "language": "普通话"},
+    {"id": "Radio Gol",   "name": "拉迪奥·戈尔", "desc": "足球诗人解说员",                  "gender": "男", "language": "普通话"},
+    # 方言
+    {"id": "Jada",        "name": "上海-阿珍",   "desc": "风风火火的沪上阿姐",              "gender": "女", "language": "上海话"},
+    {"id": "Dylan",       "name": "北京-晓东",   "desc": "北京胡同里长大的少年",            "gender": "男", "language": "北京话"},
+    {"id": "Li",          "name": "南京-老李",   "desc": "耐心的瑜伽老师",                  "gender": "男", "language": "南京话"},
+    {"id": "Marcus",      "name": "陕西-秦川",   "desc": "面宽话短，心实声沉",              "gender": "男", "language": "陕西话"},
+    {"id": "Roy",         "name": "闽南-阿杰",   "desc": "诙谐直爽的台湾哥仔",              "gender": "男", "language": "闽南语"},
+    {"id": "Peter",       "name": "天津-李彼得", "desc": "天津相声专业捧哏",                "gender": "男", "language": "天津话"},
+    {"id": "Sunny",       "name": "四川-晴儿",   "desc": "甜到心里的川妹子",                "gender": "女", "language": "四川话"},
+    {"id": "Eric",        "name": "四川-程川",   "desc": "跳脱市井的成都男子",              "gender": "男", "language": "四川话"},
+    {"id": "Rocky",       "name": "粤语-阿强",   "desc": "幽默风趣在线陪聊",                "gender": "男", "language": "粤语"},
+    {"id": "Kiki",        "name": "粤语-阿清",   "desc": "甜美的港妹闺蜜",                  "gender": "女", "language": "粤语"},
+]
 
 
 @app.post("/api/tts")
@@ -136,6 +191,7 @@ async def api_tts_info():
         language=os.getenv("TTS_LANGUAGE", "Chinese"),
         cache_dir=str(cache_dir),
         cache_size=cache_size,
+        voices=QWEN3_TTS_FLASH_VOICES,
     )
 
 
@@ -442,40 +498,35 @@ class SubtitleGenerateRequest(BaseModel):
 
 @app.post("/api/generate-subtitles")
 async def generate_subtitles_api(req: SubtitleGenerateRequest):
-    """为在线视频生成字幕"""
+    """为在线视频生成字幕（默认仅返回英文，不自动翻译）"""
     video_url = req.video_url
     is_youtube = "youtube.com" in video_url or "youtu.be" in video_url
-    
+
     # ========== YouTube 视频：直接获取官方字幕 ==========
     if is_youtube:
         logger.info(f"正在获取 YouTube 字幕: {video_url}")
-        
+
         try:
             from services.youtube_subtitles import get_youtube_subtitles
             result = await get_youtube_subtitles(video_url)
-            
+
             subtitles = result["subtitles"]
-            
+
             if not subtitles:
                 raise HTTPException(400, "该视频没有字幕。请尝试其他视频或手动上传字幕文件。")
-            
+
             # 合并短句（YouTube 字幕可能很短，按句子合并）
             merged_subtitles = _merge_short_subtitles(subtitles)
-            
-            # 翻译
-            en_list = [s["en"] for s in merged_subtitles]
-            try:
-                from services.translate import translate_sentences
-                translations = await translate_sentences(en_list)
-                for s, tr in zip(merged_subtitles, translations):
-                    s["zh"] = tr.get("zh", "")
-            except Exception as e:
-                logger.warning(f"翻译失败: {e}")
-            
+
+            # 注意：默认不自动翻译中文，由前端在用户勾选「显示中文」时
+            # 通过 /api/translate-subtitles 触发翻译，避免无谓的 token 消耗。
+            for s in merged_subtitles:
+                s["zh"] = ""
+
             duration = merged_subtitles[-1]["end"] if merged_subtitles else 0
-            
+
             logger.info(f"YouTube 字幕获取成功: {len(merged_subtitles)} 句")
-            
+
             return {
                 "subtitles": merged_subtitles,
                 "duration": round(duration, 2),
@@ -483,7 +534,7 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
                 "source": "youtube_official",
                 "is_auto_generated": result.get("is_auto_generated", False),
             }
-            
+
         except ValueError as e:
             raise HTTPException(400, str(e))
         except Exception as e:
@@ -493,6 +544,29 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
     # ========== 普通视频链接（MP4/WebM 等）：使用 AI 识别 ==========
     from services.online_video import process_online_video
     return await process_online_video(video_url, req.language)
+
+
+class TranslateSubtitlesRequest(BaseModel):
+    sentences: list[str]
+
+
+@app.post("/api/translate-subtitles")
+async def translate_subtitles_api(req: TranslateSubtitlesRequest):
+    """
+    翻译字幕：仅在用户主动勾选「显示中文」时调用。
+    入参：英文句子数组；返回：与入参等长的 [{en, zh}, ...]。
+    """
+    sentences = [s for s in (req.sentences or []) if isinstance(s, str) and s.strip()]
+    if not sentences:
+        return {"translations": []}
+
+    try:
+        translations = await translate_sentences(sentences)
+    except Exception as e:
+        logger.exception("翻译失败")
+        raise HTTPException(500, f"翻译失败: {e}")
+
+    return {"translations": translations}
 
 
 def _merge_short_subtitles(subtitles: list, min_duration: float = 3.0) -> list:
@@ -535,6 +609,158 @@ def _merge_short_subtitles(subtitles: list, min_duration: float = 3.0) -> list:
         merged.append(current)
     
     return merged
+
+
+# ========== 历史记录 API ==========
+import hashlib
+from datetime import datetime
+
+HISTORY_DIR = BASE_DIR / "data" / "history"
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _history_id(payload: dict) -> str:
+    """根据记录内容生成稳定 ID（同文件/同 URL 永远拿到同一 ID）"""
+    if payload.get("type") == "youtube":
+        raw = f"youtube:{payload.get('source', '')}"
+    elif payload.get("type") == "online_url":
+        raw = f"url:{payload.get('source', '')}"
+    else:
+        raw = f"local:{payload.get('source', '')}:{payload.get('size_bytes', 0)}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _read_history_file(history_id: str) -> Optional[dict]:
+    fp = HISTORY_DIR / f"{history_id}.json"
+    if not fp.exists():
+        return None
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning(f"历史记录文件读取失败: {fp}")
+        return None
+
+
+def _write_history_file(record: dict) -> None:
+    fp = HISTORY_DIR / f"{record['id']}.json"
+    fp.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _list_history_files() -> list[dict]:
+    items = []
+    for fp in HISTORY_DIR.glob("*.json"):
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            # 列表接口不返回字幕全文，节省流量
+            lite = {k: v for k, v in data.items() if k not in ("subtitles", "raw_text")}
+            lite["has_subtitles"] = bool(data.get("subtitles"))
+            items.append(lite)
+        except Exception:
+            logger.warning(f"历史记录跳过损坏文件: {fp}")
+    items.sort(key=lambda x: x.get("last_opened") or x.get("created_at") or "", reverse=True)
+    return items
+
+
+class HistoryCreateRequest(BaseModel):
+    type: str  # local | youtube | online_url
+    title: str
+    source: str  # 文件名 / YouTube ID / 在线 URL
+    size_bytes: int = 0
+    duration: float = 0
+    subtitles: list[dict] = []
+    raw_text: str = ""
+    progress_seconds: float = 0
+
+
+class HistoryProgressRequest(BaseModel):
+    progress_seconds: float
+
+
+@app.get("/api/history")
+async def list_history():
+    """列出所有历史记录（不含字幕正文）"""
+    return {"items": _list_history_files()}
+
+
+@app.get("/api/history/{history_id}")
+async def get_history(history_id: str):
+    """获取单条历史记录（含字幕）"""
+    rec = _read_history_file(history_id)
+    if not rec:
+        raise HTTPException(404, "历史记录不存在")
+    return rec
+
+
+@app.post("/api/history")
+async def create_or_update_history(req: HistoryCreateRequest):
+    """创建或更新历史记录。
+    同一文件/URL 重复上传时，会保留最早记录、刷新字幕和 last_opened 进度。
+    """
+    if req.type not in ("local", "youtube", "online_url"):
+        raise HTTPException(400, "type 必须是 local / youtube / online_url")
+
+    hid = _history_id(req.model_dump())
+    existing = _read_history_file(hid)
+    now = _now_iso()
+    if existing:
+        # 合并：保留 created_at 和 open_count，刷新字幕和进度
+        rec = existing
+        rec["title"] = req.title or rec.get("title", "")
+        rec["source"] = req.source or rec.get("source", "")
+        rec["size_bytes"] = req.size_bytes or rec.get("size_bytes", 0)
+        rec["duration"] = req.duration or rec.get("duration", 0)
+        rec["subtitles"] = req.subtitles or rec.get("subtitles", [])
+        rec["raw_text"] = req.raw_text or rec.get("raw_text", "")
+        rec["type"] = req.type
+        rec["last_opened"] = now
+        rec["open_count"] = (rec.get("open_count", 0) or 0) + 1
+        if req.progress_seconds:
+            rec["progress_seconds"] = req.progress_seconds
+    else:
+        rec = {
+            "id": hid,
+            "type": req.type,
+            "title": req.title,
+            "source": req.source,
+            "size_bytes": req.size_bytes,
+            "duration": req.duration,
+            "subtitles": req.subtitles,
+            "raw_text": req.raw_text,
+            "progress_seconds": req.progress_seconds,
+            "created_at": now,
+            "last_opened": now,
+            "open_count": 1,
+        }
+    _write_history_file(rec)
+    return {"id": hid, "open_count": rec["open_count"]}
+
+
+@app.patch("/api/history/{history_id}/progress")
+async def update_history_progress(history_id: str, req: HistoryProgressRequest):
+    """仅更新观看进度（节流调用）"""
+    rec = _read_history_file(history_id)
+    if not rec:
+        raise HTTPException(404, "历史记录不存在")
+    rec["progress_seconds"] = max(0, float(req.progress_seconds))
+    rec["last_opened"] = _now_iso()
+    _write_history_file(rec)
+    return {"id": history_id, "progress_seconds": rec["progress_seconds"]}
+
+
+@app.delete("/api/history/{history_id}")
+async def delete_history(history_id: str):
+    fp = HISTORY_DIR / f"{history_id}.json"
+    if not fp.exists():
+        raise HTTPException(404, "历史记录不存在")
+    fp.unlink()
+    return {"id": history_id, "deleted": True}
 
 
 FRONTEND_DIR = (BASE_DIR.parent / "frontend").resolve()

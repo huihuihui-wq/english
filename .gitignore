@@ -17,6 +17,9 @@ backend/data/materials/daily/*/
 !backend/data/materials/static/manifest.json
 !backend/data/materials/daily/**/candidates.json
 
+# User-specific history (subtitle cache + watch progress)
+backend/data/history/
+
 # IDE
 .vscode/
 .idea/

@@ -193,10 +193,10 @@ const LinkHandler = (() => {
 
   function showPlayer(title) {
     const fileNameEl = document.getElementById('fileName');
-    const splitView = document.getElementById('splitView');
+    const splitWrap = document.getElementById('splitWrap');
 
     if (fileNameEl) fileNameEl.textContent = title;
-    if (splitView) splitView.hidden = false;
+    if (splitWrap) splitWrap.hidden = false;
 
     // 判断视频类型
     const isYouTube = extractYouTubeId(currentVideoUrl) !== null;
@@ -216,9 +216,10 @@ const LinkHandler = (() => {
       if (isYouTube) {
         statusEl.innerHTML = '📺 <strong>YouTube 视频</strong><br><br>' +
           '点击"🤖 AI 生成字幕"直接获取 YouTube 官方字幕（无需下载）<br><br>' +
-          '或点击"📤 上传字幕"上传自己的字幕文件';
+          '或点击"📤 上传字幕"上传自己的字幕文件<br><br>' +
+          '💡 中文翻译默认关闭；勾选右侧"显示中文"才会调用模型翻译';
         statusEl.className = 'subtitle-status';
-        
+
         if (subStats) {
           subStats.innerHTML = '⬆️ 点击"AI 生成"获取 YouTube 字幕';
         }
@@ -226,9 +227,10 @@ const LinkHandler = (() => {
         statusEl.innerHTML = '💡 <strong>在线视频</strong><br><br>' +
           '您可以：<br>' +
           '1. 点击"🤖 AI 生成"自动识别字幕<br>' +
-          '2. 点击"📤 上传字幕"上传 .srt 文件';
+          '2. 点击"📤 上传字幕"上传 .srt 文件<br><br>' +
+          '💡 中文翻译默认关闭；勾选右侧"显示中文"才会调用模型翻译';
         statusEl.className = 'subtitle-status';
-        
+
         if (subStats) {
           subStats.innerHTML = '⬆️ 请上传字幕文件或使用 AI 生成';
         }
@@ -265,7 +267,22 @@ const LinkHandler = (() => {
         
         currentSubtitles = subtitles;
         loadSubtitlesIntoPlayer(subtitles);
-        
+
+        // 保存到历史记录
+        if (window.History && window.History.save && currentVideoUrl) {
+          const ytId = extractYouTubeId(currentVideoUrl);
+          const dur = subtitles[subtitles.length - 1]?.end || 0;
+          window.History.save({
+            type: ytId ? "youtube" : "online_url",
+            title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || '在线视频'),
+            source: ytId || currentVideoUrl,
+            size_bytes: 0,
+            duration: dur,
+            subtitles: subtitles,
+            raw_text: "",
+          });
+        }
+
         statusEl.textContent = `✅ 字幕加载成功！共 ${subtitles.length} 句`;
         statusEl.className = 'subtitle-status success';
         
@@ -324,16 +341,31 @@ const LinkHandler = (() => {
 
       currentSubtitles = data.subtitles;
       loadSubtitlesIntoPlayer(data.subtitles);
-      
+
+      // 保存到历史记录
+      if (window.History && window.History.save) {
+        const ytId = extractYouTubeId(currentVideoUrl);
+        const dur = data.duration || data.subtitles[data.subtitles.length - 1]?.end || 0;
+        window.History.save({
+          type: ytId ? "youtube" : "online_url",
+          title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || '在线视频'),
+          source: ytId || currentVideoUrl,
+          size_bytes: 0,
+          duration: dur,
+          subtitles: data.subtitles || [],
+          raw_text: data.raw_text || "",
+        });
+      }
+
       // 显示成功信息
       const source = data.source || 'ai';
       const isAuto = data.is_auto_generated || false;
-      
+
       if (source === 'youtube_official') {
         const autoText = isAuto ? '（自动生成）' : '（官方字幕）';
-        statusEl.innerHTML = `✅ YouTube 字幕获取成功${autoText}！共 ${data.subtitles.length} 句`;
+        statusEl.innerHTML = `✅ YouTube 字幕获取成功${autoText}！共 ${data.subtitles.length} 句<br>💡 勾选「显示中文」可调用模型翻译中文`;
       } else {
-        statusEl.textContent = `✅ AI 字幕生成成功！共 ${data.subtitles.length} 句`;
+        statusEl.innerHTML = `✅ AI 字幕生成成功！共 ${data.subtitles.length} 句<br>💡 勾选「显示中文」可调用模型翻译中文`;
       }
       statusEl.className = 'subtitle-status success';
 

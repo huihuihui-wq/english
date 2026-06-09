@@ -15,17 +15,60 @@
     el.scrollTop = el.scrollHeight;
   }
 
-  // 1. 加载引擎信息
+  // 1. 加载引擎信息 + 动态填充音色下拉框
+  let engineInfo = null;
   async function loadEngineInfo() {
     try {
       const r = await fetch("/api/tts/info");
-      const d = await r.json();
-      $("ttsEngineInfo").textContent = `${d.model} | 音色 ${d.voice} | 语种 ${d.language} | 缓存 ${d.cache_size} 条`;
-      log(`引擎: ${d.model}, 默认音色: ${d.voice}`, "success");
+      engineInfo = await r.json();
+      $("ttsEngineInfo").textContent =
+        `${engineInfo.model} | 音色 ${engineInfo.voice} | 语种 ${engineInfo.language} | 缓存 ${engineInfo.cache_size} 条 | 共 ${engineInfo.voices.length} 个音色`;
+      log(`引擎: ${engineInfo.model}, 默认音色: ${engineInfo.voice}, 共 ${engineInfo.voices.length} 个音色`, "success");
+      populateVoices(engineInfo.voices, engineInfo.voice);
     } catch (e) {
       $("ttsEngineInfo").textContent = "加载失败: " + e.message;
       log("加载引擎信息失败: " + e.message, "error");
     }
+  }
+
+  // 1b. 把音色按"语言分组"渲染到 <select>
+  function populateVoices(voices, defaultVoice) {
+    const sel = $("ttsVoice");
+    if (!sel || !voices) return;
+    sel.innerHTML = "";
+
+    // 按 language 分组
+    const groups = {};
+    for (const v of voices) {
+      const lang = v.language || "其他";
+      if (!groups[lang]) groups[lang] = [];
+      groups[lang].push(v);
+    }
+
+    // 顺序: 普通话 -> 各方言 -> 其他
+    const order = ["普通话", "上海话", "北京话", "南京话", "陕西话", "闽南语", "天津话", "四川话", "粤语"];
+    const sortedLangs = Object.keys(groups).sort((a, b) => {
+      const ia = order.indexOf(a); const ib = order.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1; if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    for (const lang of sortedLangs) {
+      const og = document.createElement("optgroup");
+      og.label = `【${lang}】${groups[lang].length} 个`;
+      for (const v of groups[lang]) {
+        const opt = document.createElement("option");
+        opt.value = v.id;
+        // 展示: "Cherry · 芊悦 (女) - 阳光积极、亲切自然小姐姐"
+        opt.textContent = `${v.id} · ${v.name} (${v.gender}) - ${v.desc}`;
+        opt.title = opt.textContent;
+        if (v.id === defaultVoice) opt.selected = true;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+    log(`已加载 ${voices.length} 个音色, 分 ${sortedLangs.length} 组`, "info");
   }
 
   // 2. 合成
@@ -68,7 +111,7 @@
       $("ttsMetaSize").innerHTML = `音频 <code>${(audioSize / 1024).toFixed(1)}</code> KB`;
       $("ttsMetaTime").innerHTML = `耗时 <code>${((performance.now() - t0) / 1000).toFixed(2)}</code> s`;
 
-      log(`合成成功: ${txtLen} 字符 -> ${(audioSize / 1024).toFixed(1)} KB, 耗时 ${((performance.now() - t0) / 1000).toFixed(2)}s`, "success");
+      log(`合成成功: 音色=${voice}, ${txtLen} 字符 -> ${(audioSize / 1024).toFixed(1)} KB, 耗时 ${((performance.now() - t0) / 1000).toFixed(2)}s`, "success");
 
       if (download) {
         const a = document.createElement("a");
