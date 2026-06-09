@@ -45,13 +45,13 @@ const Materials = (() => {
   }
 
   async function loadDaily() {
-    // 每日素材也走 /api/materials，靠 item.date 区分
+    // 每日素材走 /api/materials，靠 item.date 区分
     try {
-      const resp = await fetch("/api/materials?category=BBC%20News");
+      const resp = await fetch("/api/materials");
       const data = await resp.json();
       const items = (data.materials || []).filter((m) => m.date);
       if (items.length === 0) {
-        // 保留默认 empty 提示
+        dailyGrid.innerHTML = `<div class="materials-empty">暂无每日更新。edge-tts 每天生成 5 段新素材。</div>`;
         return;
       }
       render(dailyGrid, items, true);
