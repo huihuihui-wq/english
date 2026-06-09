@@ -83,7 +83,7 @@
       "audio_url": "/api/materials/daily-monday/audio",
       "srt_url": "/api/materials/daily-monday/srt",
       "is_placeholder": false,
-      "date": "2026-06-08",
+      "date": "2026-06-09",
       "source": "Daily Generated"
     },
     {
@@ -99,7 +99,7 @@
       "audio_url": "/api/materials/daily-quote/audio",
       "srt_url": "/api/materials/daily-quote/srt",
       "is_placeholder": false,
-      "date": "2026-06-08",
+      "date": "2026-06-09",
       "source": "Daily Generated"
     },
     {
@@ -115,7 +115,7 @@
       "audio_url": "/api/materials/daily-sci/audio",
       "srt_url": "/api/materials/daily-sci/srt",
       "is_placeholder": false,
-      "date": "2026-06-08",
+      "date": "2026-06-09",
       "source": "Daily Generated"
     },
     {
@@ -131,7 +131,7 @@
       "audio_url": "/api/materials/daily-lifehack/audio",
       "srt_url": "/api/materials/daily-lifehack/srt",
       "is_placeholder": false,
-      "date": "2026-06-08",
+      "date": "2026-06-09",
       "source": "Daily Generated"
     },
     {
@@ -147,59 +147,11 @@
       "audio_url": "/api/materials/daily-news-tech/audio",
       "srt_url": "/api/materials/daily-news-tech/srt",
       "is_placeholder": false,
-      "date": "2026-06-08",
+      "date": "2026-06-09",
       "source": "Daily Generated"
-    },
-    {
-      "id": "video-nasa-space",
-      "title": "NASA: Space Race to the Moon",
-      "description": "NASA 纪录片：太空竞赛（真实视频，2分钟剪辑）",
-      "category": "Documentary",
-      "difficulty": "intermediate",
-      "speed": 1.0,
-      "icon": "NASA",
-      "color": "#1e40af",
-      "duration": 120.0,
-      "audio_url": "/api/materials/video-nasa-space/audio",
-      "srt_url": "/api/materials/video-nasa-space/srt",
-      "is_placeholder": false,
-      "source": "Real Video",
-      "has_video": true
-    },
-    {
-      "id": "video-ted-education",
-      "title": "TED-Ed: The Power of Education",
-      "description": "TED-Ed 教育短片（真实视频，2分钟剪辑）",
-      "category": "Education",
-      "difficulty": "intermediate",
-      "speed": 1.0,
-      "icon": "TED",
-      "color": "#e11d48",
-      "duration": 120.0,
-      "audio_url": "/api/materials/video-ted-education/audio",
-      "srt_url": "/api/materials/video-ted-education/srt",
-      "is_placeholder": false,
-      "source": "Real Video",
-      "has_video": true
-    },
-    {
-      "id": "video-bbc-news",
-      "title": "BBC Learning English: News Report",
-      "description": "BBC 英语学习新闻报道（真实视频，2分钟剪辑）",
-      "category": "News",
-      "difficulty": "beginner",
-      "speed": 1.0,
-      "icon": "BBC",
-      "color": "#b91c1c",
-      "duration": 120.0,
-      "audio_url": "/api/materials/video-bbc-news/audio",
-      "srt_url": "/api/materials/video-bbc-news/srt",
-      "is_placeholder": false,
-      "source": "Real Video",
-      "has_video": true
     }
   ],
-  "updated": "2026-06-08",
-  "note": "Real video materials from NASA, TED-Ed, BBC",
-  "total": 13
+  "updated": "2026-06-09",
+  "note": "Real materials generated with Microsoft Azure Neural TTS (edge-tts)",
+  "total": 10
 }
