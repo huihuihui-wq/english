@@ -5,8 +5,8 @@
 ## ✨ 功能
 
 - 📁 **拖入音视频**（mp3 / wav / m4a / mp4，≤50MB / ≤1h）
-- 🤖 **AI 自动转写**（SiliconFlow `FunAudioLLM/SenseVoiceSmall`）
-- 🌐 **逐句翻译**（SiliconFlow `tencent/Hunyuan-MT-7B`，WMT2025 30/31 赛道冠军）
+- 🤖 **AI 自动转写**（DashScope `qwen3-asr-flash`）
+- 🌐 **逐句翻译**（DashScope `qwen-plus`）
 - ⏱ **按句时间轴**（按标点切句 + 字符数等比分配）
 - ⏯ **播放器**：倍速 0.5x ~ 2x / 单句跳转 / 进度条
 - 🔁 **跟读模式**：每句重读 N 次（可调） + 句间停顿（可调）
@@ -19,8 +19,8 @@
 |---|---|
 | 前端 | 纯 HTML + 原生 JS（无构建） |
 | 后端 | Python 3.10+ / FastAPI / Uvicorn |
-| ASR | SiliconFlow `FunAudioLLM/SenseVoiceSmall` |
-| 翻译 | SiliconFlow `tencent/Hunyuan-MT-7B` |
+| ASR | DashScope `qwen3-asr-flash` |
+| 翻译 | DashScope `qwen-plus` |
 | 时间戳 | 比例估算（按标点切句 + 字符数等比分配） |
 
 ## 🚀 快速开始
@@ -40,7 +40,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # 编辑填入 SILICONFLOW_API_KEY
+cp .env.example .env   # 编辑填入 DASHSCOPE_API_KEY
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -49,14 +49,14 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 `backend/.env`：
 
 ```env
-SILICONFLOW_API_KEY=sk-xxxxxxxxxxxx
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-ASR_MODEL=FunAudioLLM/SenseVoiceSmall
-TRANSLATE_MODEL=tencent/Hunyuan-MT-7B
+DASHSCOPE_API_KEY=sk-xxxxxxxxxxxx
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+ASR_MODEL=qwen3-asr-flash
+TRANSLATE_MODEL=qwen-plus
 MAX_UPLOAD_MB=50
 ```
 
-> 申请 Key：https://cloud.siliconflow.cn/account/ak
+> 申请 Key：https://bailian.console.aliyun.com/?tab=model#/api-key
 
 ## 📁 项目结构
 
@@ -65,8 +65,8 @@ shadow-reader/
 ├── backend/
 │   ├── main.py              # FastAPI 入口
 │   ├── services/
-│   │   ├── asr.py           # SiliconFlow ASR
-│   │   ├── translate.py     # Hunyuan-MT-7B 翻译
+│   │   ├── asr.py           # DashScope ASR
+│   │   ├── translate.py     # qwen-plus 翻译
 │   │   └── subtitle.py      # 切句 + 时间戳
 │   ├── .env                 # API Key（勿提交）
 │   ├── .env.example
@@ -110,7 +110,7 @@ shadow-reader/
 ## ⚠️ 已知限制
 
 - **时间戳为估算值**（按字符数等比），与真实断句可能偏差 1-3 秒。对跟读场景已足够使用。
-- **单文件 ≤ 50MB / ≤ 1 小时**（SiliconFlow 限制）。
+- **单文件 ≤ 50MB / ≤ 1 小时**（DashScope 限制）。
 - **不支持视频字幕轨道抽取**（仅取音频流播放）。
 
 ## 🗺 路线图

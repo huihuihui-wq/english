@@ -81,6 +81,64 @@ async def health():
     return {"status": "ok"}
 
 
+# ========== 纯 TTS API (供前端 TTS 测试 tab 使用) ==========
+class TTSRequest(BaseModel):
+    text: str
+    voice: Optional[str] = None  # 不传则用环境变量 TTS_VOICE
+
+
+class TTSInfoResponse(BaseModel):
+    model: str
+    voice: str
+    language: str
+    cache_dir: str
+    cache_size: int
+
+
+@app.post("/api/tts")
+async def api_tts(req: TTSRequest):
+    """
+    纯 TTS 接口: 输入文本 -> 返回 MP3 音频字节.
+    供前端 "TTS 测试" tab 调用, 与 AI 教练解耦.
+    """
+    from services.voice_service import synthesize_speech
+    if not req.text or not req.text.strip():
+        raise HTTPException(400, "text 不能为空")
+    if len(req.text) > 2000:
+        raise HTTPException(400, "text 过长 (上限 2000 字符)")
+    try:
+        audio_bytes = await synthesize_speech(req.text, voice=req.voice or os.getenv("TTS_VOICE", "Cherry"))
+    except Exception as e:
+        logger.exception("TTS 失败")
+        raise HTTPException(500, f"TTS 失败: {e}")
+    from fastapi import Response
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mp3",
+        headers={
+            "X-Text-Length": str(len(req.text)),
+            "X-Audio-Size": str(len(audio_bytes)),
+        },
+    )
+
+
+@app.get("/api/tts/info")
+async def api_tts_info():
+    """返回当前 TTS 配置 (供前端 UI 展示)."""
+    from pathlib import Path
+    cache_dir = Path(os.getenv("TTS_CACHE_DIR", str(BASE_DIR / ".tts_cache")))
+    cache_size = 0
+    if cache_dir.exists():
+        cache_size = sum(1 for _ in cache_dir.glob("*.wav"))
+    return TTSInfoResponse(
+        model=os.getenv("TTS_MODEL", "qwen3-tts-flash"),
+        voice=os.getenv("TTS_VOICE", "Cherry"),
+        language=os.getenv("TTS_LANGUAGE", "Chinese"),
+        cache_dir=str(cache_dir),
+        cache_size=cache_size,
+    )
+
+
 import subprocess
 from services.funasr import transcribe_with_words
 
@@ -94,7 +152,7 @@ async def transcribe(
     1) ffmpeg 抽音 → 存临时文件 → 本地 URL 供 fun-asr 下载
     2) DashScope fun-asr 异步转写，返回词级时间戳
     3) 按标点切句
-    4) 调用 Hunyuan-MT-7B 翻译
+    4) DashScope qwen-plus 翻译
     5) 返回结构化字幕（毫秒级对齐）
     """
     content_type = file.content_type or "application/octet-stream"
@@ -135,38 +193,53 @@ async def transcribe(
             serve_name = mp3_name
         else:
             serve_name = tmp_name
+            mp3_path = tmp_path
 
-        # 构造本地可访问 URL（fun-asr 需要公网/内网 URL，这里用 localhost）
-        # 注意：DashScope 服务器在外网，无法访问 localhost。
-        # 解决方案：先用 qwen3-asr-flash 拿文本（已有），再用本地对齐
-        # 或者使用 ngrok/内网穿透（复杂）。
-        #  pragmatic 方案：回退到 qwen3-asr-flash + 比例分配，但修复 duration。
-        #  更好的方案：用本地 whisper 强制对齐（需要装模型）。
-        #  最简方案：先尝试用现有 qwen3-asr-flash 结果，如果 words 为空，
-        #            用 ffprobe 拿真实 duration，再做比例分配（比文件大小估算准得多）。
+        # 尝试使用 Paraformer 进行精准识别（词级时间戳）
+        from services.paraformer_asr import transcribe_local_file, get_oss_config_status
+        
+        oss_status = get_oss_config_status()
+        words = []
+        text = ""
+        real_duration = 0
+        
+        if oss_status["configured"]:
+            logger.info("OSS 已配置，使用 Paraformer 精准识别...")
+            try:
+                mp3_bytes = mp3_path.read_bytes()
+                paraformer_result = await transcribe_local_file(
+                    mp3_bytes, serve_name, "audio/mpeg", language="en"
+                )
+                text = paraformer_result["text"]
+                words = paraformer_result["words"]
+                real_duration = paraformer_result["duration_ms"] / 1000.0
+                logger.info(f"Paraformer 识别成功: {len(words)} 词")
+            except Exception as e:
+                logger.warning(f"Paraformer 识别失败，回退到 qwen3-asr-flash: {e}")
+                words = []
+        else:
+            logger.info("OSS 未配置，使用 qwen3-asr-flash...")
 
-        # 先用 qwen3-asr-flash 拿文本（传入抽音后的 mp3 字节）
-        from services.asr import transcribe_audio as asr_flash
-        mp3_bytes = file_bytes
-        if content_type.startswith("video/") or ext in ("mp4", "mov", "avi", "mkv", "flv", "webm"):
-            mp3_bytes = mp3_path.read_bytes()
-        asr_result = await asr_flash(mp3_bytes, serve_name, "audio/mpeg")
-        text = asr_result.get("text", "").strip()
-        words = asr_result.get("words", [])
-
-        # 如果 qwen3-asr-flash 没返回 words（通常情况），用 ffprobe 拿真实 duration 做比例分配
+        # 如果 Paraformer 失败或未配置，回退到 qwen3-asr-flash
         if not words:
-            logger.info("qwen3-asr-flash 未返回词级时间戳，用 ffprobe 拿真实时长 + 比例分配")
+            from services.asr import transcribe_audio as asr_flash
+            mp3_bytes = mp3_path.read_bytes()
+            asr_result = await asr_flash(mp3_bytes, serve_name, "audio/mpeg")
+            text = asr_result.get("text", "").strip()
+            words = asr_result.get("words", [])
+            real_duration = asr_result.get("duration_ms", 0) / 1000.0
+
+        # 使用词级时间戳切句（如果可用）
+        if words:
+            logger.info(f"使用词级时间戳切句: {len(words)} 词")
+            items = split_sentences_with_timestamps(words, text)
+        else:
+            logger.info("无词级时间戳，使用比例分配")
             real_duration = _get_real_duration(str(tmp_path))
             if real_duration <= 0:
                 real_duration = get_audio_duration(file_bytes, content_type)
-
-            # 比例分配时间戳
             from services.subtitle import _fallback_proportional
             items = _fallback_proportional(text, int(real_duration * 1000))
-        else:
-            items = split_sentences_with_timestamps(words, text)
-            real_duration = asr_result.get("duration_ms", 0) / 1000.0
 
         if not items:
             raise HTTPException(400, "未能切出任何句子")
@@ -175,15 +248,21 @@ async def transcribe(
             duration = real_duration if real_duration > 0 else get_audio_duration(file_bytes, content_type)
 
         en_list = [it["en"] for it in items]
+        logger.info(f"准备翻译 {len(en_list)} 句: {en_list[:3]}...")
 
         try:
             translations = await translate_sentences(en_list)
+            logger.info(f"翻译成功，返回 {len(translations)} 条")
+            # 检查前几条的翻译结果
+            for i, tr in enumerate(translations[:3]):
+                logger.info(f"  翻译[{i}]: zh='{tr.get('zh', '')[:50]}'")
         except Exception as e:
-            logger.exception("翻译失败")
+            logger.exception(f"翻译失败: {e}")
             translations = [{"en": s, "zh": ""} for s in en_list]
 
         for it, tr in zip(items, translations):
             it["zh"] = tr.get("zh", "")
+            logger.debug(f"字幕赋值: en='{it['en'][:30]}' -> zh='{it.get('zh', '')[:30]}'")
 
         subtitles = [
             SubtitleItem(
@@ -206,9 +285,9 @@ async def transcribe(
         try:
             if tmp_path.exists():
                 tmp_path.unlink()
-            mp3_path = TEMP_DIR / (tmp_name.rsplit(".", 1)[0] + ".mp3")
-            if mp3_path.exists():
-                mp3_path.unlink()
+            mp3_tmp = TEMP_DIR / (tmp_name.rsplit(".", 1)[0] + ".mp3")
+            if mp3_tmp.exists() and mp3_tmp != tmp_path:
+                mp3_tmp.unlink()
         except Exception:
             pass
 
@@ -228,6 +307,121 @@ def _get_real_duration(filepath: str) -> float:
     return 0.0
 
 
+# ========== AI 助手 API ==========
+from services.ai_service import chat, exam_chat, generate_exam_questions
+from services.voice_service import voice_chat, synthesize_speech
+
+class ChatRequest(BaseModel):
+    message: str
+    context: Optional[str] = None
+    mode: str = "chat"  # "chat" or "exam"
+    question: Optional[str] = None
+    questionIndex: int = 0
+    totalQuestions: int = 0
+    voice: bool = False  # 是否同时返回语音
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(req: ChatRequest):
+    """AI 对话接口（支持语音回复）"""
+    try:
+        if req.mode == "exam" and req.question:
+            result = await exam_chat(
+                message=req.message,
+                question=req.question,
+                question_index=req.questionIndex,
+                total_questions=req.totalQuestions,
+            )
+            # 如果请求语音，合成语音
+            if req.voice and result.get("reply"):
+                from services.voice_service import synthesize_speech
+                try:
+                    audio_bytes = await synthesize_speech(result["reply"])
+                    import base64
+                    result["audio_base64"] = base64.b64encode(audio_bytes).decode()
+                    result["audio_mime"] = "audio/mp3"
+                except Exception as e:
+                    logger.warning(f"语音合成失败: {e}")
+                    result["audio_base64"] = ""
+                    result["audio_mime"] = "audio/mp3"
+            return result
+        else:
+            reply = await chat(
+                message=req.message,
+                context=req.context,
+            )
+            result = {"reply": reply}
+            # 如果请求语音，合成语音
+            if req.voice:
+                from services.voice_service import synthesize_speech
+                try:
+                    audio_bytes = await synthesize_speech(reply)
+                    import base64
+                    result["audio_base64"] = base64.b64encode(audio_bytes).decode()
+                    result["audio_mime"] = "audio/mp3"
+                except Exception as e:
+                    logger.warning(f"语音合成失败: {e}")
+                    result["audio_base64"] = ""
+                    result["audio_mime"] = "audio/mp3"
+            return result
+    except Exception as e:
+        logger.exception("AI chat failed")
+        raise HTTPException(500, f"AI对话失败: {str(e)}")
+
+
+class ExamGenerateRequest(BaseModel):
+    subtitles: list[dict]
+    count: int = 3
+
+
+@app.post("/api/ai/generate-exam")
+async def ai_generate_exam(req: ExamGenerateRequest):
+    """基于字幕生成雅思口语试题"""
+    try:
+        questions = await generate_exam_questions(
+            subtitles=req.subtitles,
+            count=min(req.count, 5),  # 最多5题
+        )
+        return {"questions": questions}
+    except Exception as e:
+        logger.exception("Exam generation failed")
+        raise HTTPException(500, f"试题生成失败: {str(e)}")
+
+
+# ========== 语音对话 API ==========
+@app.post("/api/ai/voice-chat")
+async def ai_voice_chat(
+    file: UploadFile = File(...),
+    context: Optional[str] = Form(None),
+):
+    """
+    语音对话接口：
+    1. 接收用户语音（WAV/WEBM格式）
+    2. Paraformer ASR 识别 -> 文字
+    3. qwen-plus 生成回复 -> 文字
+    4. qwen3-tts 合成语音 -> MP3
+    5. 返回识别结果+AI回复+语音数据
+    """
+    try:
+        # 读取音频文件
+        audio_bytes = await file.read()
+        if not audio_bytes:
+            raise HTTPException(400, "音频文件为空")
+        
+        logger.info(f"接收语音: {file.filename}, size={len(audio_bytes)/1024:.1f}KB")
+        
+        # 调用语音对话服务
+        result = await voice_chat(audio_bytes, context)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Voice chat failed")
+        raise HTTPException(500, f"语音对话失败: {str(e)}")
+
+
 # 临时文件服务（供 fun-asr 异步任务下载）
 import tempfile
 import shutil
@@ -240,159 +434,107 @@ async def serve_temp(filename: str):
         return FileResponse(fp)
     raise HTTPException(404, "文件不存在")
 
-# 内置素材 API
-MATERIALS_DIR = (BASE_DIR / "data" / "materials").resolve()
-
-import re as _re
-
-def _parse_srt_time(s: str) -> float:
-    """SRT 时间格式 00:00:00,000 → 秒"""
-    m = _re.match(r"(\d+):(\d+):(\d+)[,.](\d+)", s.strip())
-    if not m:
-        return 0.0
-    h, mn, sec, ms = m.groups()
-    return int(h) * 3600 + int(mn) * 60 + int(sec) + int(ms) / 1000.0
+# ========== 字幕生成 API ==========
+class SubtitleGenerateRequest(BaseModel):
+    video_url: str
+    language: str = "en"
 
 
-def _parse_srt(content: str) -> list:
-    """解析 SRT 为 [{start, end, en}]"""
-    out = []
-    blocks = _re.split(r"\n\s*\n", content.strip())
-    for blk in blocks:
-        lines = [l.rstrip() for l in blk.splitlines() if l.strip()]
-        if len(lines) < 2:
-            continue
-        time_line = next((l for l in lines if "-->" in l), None)
-        text_lines = [l for l in lines if l != time_line and not l.isdigit()]
-        if not time_line or not text_lines:
-            continue
+@app.post("/api/generate-subtitles")
+async def generate_subtitles_api(req: SubtitleGenerateRequest):
+    """为在线视频生成字幕"""
+    video_url = req.video_url
+    is_youtube = "youtube.com" in video_url or "youtu.be" in video_url
+    
+    # ========== YouTube 视频：直接获取官方字幕 ==========
+    if is_youtube:
+        logger.info(f"正在获取 YouTube 字幕: {video_url}")
+        
         try:
-            start_s, end_s = [_parse_srt_time(t) for t in time_line.split("-->")]
-        except Exception:
+            from services.youtube_subtitles import get_youtube_subtitles
+            result = await get_youtube_subtitles(video_url)
+            
+            subtitles = result["subtitles"]
+            
+            if not subtitles:
+                raise HTTPException(400, "该视频没有字幕。请尝试其他视频或手动上传字幕文件。")
+            
+            # 合并短句（YouTube 字幕可能很短，按句子合并）
+            merged_subtitles = _merge_short_subtitles(subtitles)
+            
+            # 翻译
+            en_list = [s["en"] for s in merged_subtitles]
+            try:
+                from services.translate import translate_sentences
+                translations = await translate_sentences(en_list)
+                for s, tr in zip(merged_subtitles, translations):
+                    s["zh"] = tr.get("zh", "")
+            except Exception as e:
+                logger.warning(f"翻译失败: {e}")
+            
+            duration = merged_subtitles[-1]["end"] if merged_subtitles else 0
+            
+            logger.info(f"YouTube 字幕获取成功: {len(merged_subtitles)} 句")
+            
+            return {
+                "subtitles": merged_subtitles,
+                "duration": round(duration, 2),
+                "raw_text": result["raw_text"],
+                "source": "youtube_official",
+                "is_auto_generated": result.get("is_auto_generated", False),
+            }
+            
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            logger.exception("YouTube 字幕获取失败")
+            raise HTTPException(500, f"获取 YouTube 字幕失败: {str(e)}")
+    
+    # ========== 普通视频链接（MP4/WebM 等）：使用 AI 识别 ==========
+    from services.online_video import process_online_video
+    return await process_online_video(video_url, req.language)
+
+
+def _merge_short_subtitles(subtitles: list, min_duration: float = 3.0) -> list:
+    """合并短的 YouTube 字幕片段为完整句子"""
+    if not subtitles:
+        return []
+    
+    merged = []
+    current = None
+    
+    for sub in subtitles:
+        text = sub["en"].strip()
+        if not text:
             continue
-        text = " ".join(text_lines).strip()
-        if text:
-            out.append({"start": start_s, "end": end_s, "en": text})
-    return out
-
-
-def _load_manifest():
-    manifest_path = MATERIALS_DIR / "static" / "manifest.json"
-    if not manifest_path.exists():
-        return {"materials": [], "updated": None, "note": "manifest 不存在"}
-    try:
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.error(f"manifest 解析失败: {e}")
-        return {"materials": [], "updated": None, "note": str(e)}
-
-
-@app.get("/api/materials")
-async def list_materials(category: Optional[str] = None, difficulty: Optional[str] = None):
-    """列出所有内置素材"""
-    data = _load_manifest()
-    items = data.get("materials", [])
-    if category:
-        items = [m for m in items if m.get("category") == category]
-    if difficulty:
-        items = [m for m in items if m.get("difficulty") == difficulty]
-    return {
-        "materials": items,
-        "total": len(items),
-        "updated": data.get("updated"),
-    }
-
-
-def _find_material_path(mid: str) -> Path | None:
-    """在 static 和 daily 目录中查找素材路径"""
-    # 先查 static
-    static_path = MATERIALS_DIR / "static" / mid
-    if static_path.exists():
-        return static_path
-    # 再查 daily 下的所有日期目录
-    daily_parent = MATERIALS_DIR / "daily"
-    if daily_parent.exists():
-        for date_dir in sorted(daily_parent.iterdir(), reverse=True):
-            if date_dir.is_dir():
-                daily_path = date_dir / mid
-                if daily_path.exists():
-                    return daily_path
-    return None
-
-
-@app.get("/api/materials/{mid}/audio")
-async def get_material_audio(mid: str):
-    """获取素材音频"""
-    base = _find_material_path(mid)
-    if not base:
-        raise HTTPException(404, "素材不存在")
+        
+        # 如果是新句子开始（首字母大写），且已有累积内容，先保存
+        if current and (text[0].isupper() or text.startswith(('"', "'"))) and current["en"]:
+            # 检查是否太短
+            duration = current["end"] - current["start"]
+            if duration >= min_duration or text.endswith(('.', '!', '?')):
+                merged.append(current)
+                current = None
+        
+        if current is None:
+            current = {
+                "start": sub["start"],
+                "end": sub["end"],
+                "en": text,
+                "zh": "",
+            }
+        else:
+            current["end"] = sub["end"]
+            # 添加空格或标点
+            if current["en"] and not current["en"].endswith(' ') and not text.startswith(' '):
+                current["en"] += " "
+            current["en"] += text
     
-    # 支持 mp3 和 wav
-    for ext, mime in [(".mp3", "audio/mpeg"), (".wav", "audio/wav")]:
-        fp = base / f"audio{ext}"
-        if fp.exists():
-            return FileResponse(fp, media_type=mime)
+    # 保存最后一句
+    if current and current["en"]:
+        merged.append(current)
     
-    raise HTTPException(404, "音频文件不存在")
-
-
-@app.get("/api/materials/{mid}/srt")
-async def get_material_srt(mid: str):
-    """获取素材字幕"""
-    base = _find_material_path(mid)
-    if not base:
-        raise HTTPException(404, "素材不存在")
-    
-    fp = base / "subtitles.srt"
-    if not fp.exists():
-        raise HTTPException(404, "字幕不存在")
-    return FileResponse(fp, media_type="text/plain; charset=utf-8")
-
-
-@app.get("/api/materials/{mid}/full")
-async def get_material_full(mid: str):
-    """
-    一站式接口：返回素材的音频 URL + 解析后的字幕数组
-    前端可一次性拿到全部信息，避免多次请求
-    """
-    manifest_data = _load_manifest()
-    item = next((m for m in manifest_data.get("materials", []) if m["id"] == mid), None)
-    if not item:
-        raise HTTPException(404, "素材不存在")
-
-    base = _find_material_path(mid)
-    if not base:
-        raise HTTPException(404, "素材目录不存在")
-    
-    srt_path = base / "subtitles.srt"
-    if not srt_path.exists():
-        raise HTTPException(404, "字幕文件不存在")
-
-    content = srt_path.read_text(encoding="utf-8")
-    subtitles = _parse_srt(content)
-
-    duration = subtitles[-1]["end"] if subtitles else 0
-
-    # 翻译（可选，失败不影响）
-    en_list = [s["en"] for s in subtitles]
-    try:
-        from services.translate import translate_sentences
-        translations = await translate_sentences(en_list)
-        for s, tr in zip(subtitles, translations):
-            s["zh"] = tr.get("zh", "")
-    except Exception as e:
-        logger.warning(f"素材 {mid} 翻译失败: {e}")
-        for s in subtitles:
-            s["zh"] = ""
-
-    return {
-        "id": item["id"],
-        "title": item["title"],
-        "duration": duration,
-        "audio_url": item["audio_url"],
-        "subtitles": subtitles,
-        "is_placeholder": item.get("is_placeholder", False),
-    }
+    return merged
 
 
 FRONTEND_DIR = (BASE_DIR.parent / "frontend").resolve()

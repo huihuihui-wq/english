@@ -1,4 +1,4 @@
-"""Hunyuan-MT-7B 翻译服务 - 通过 SiliconFlow Chat Completions"""
+"""Qwen-Plus 翻译服务 - 通过 DashScope (阿里百炼) Chat Completions"""
 import os
 import json
 import re
@@ -20,9 +20,9 @@ Rules:
 
 def _get_config():
     return {
-        "api_key": os.getenv("SILICONFLOW_API_KEY", ""),
-        "base_url": os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
-        "model": os.getenv("TRANSLATE_MODEL", "tencent/Hunyuan-MT-7B"),
+        "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": os.getenv("TRANSLATE_MODEL", "qwen-plus"),
     }
 
 
@@ -35,7 +35,7 @@ async def translate_sentences(sentences: list[str]) -> list[dict]:
 
     cfg = _get_config()
     if not cfg["api_key"]:
-        raise RuntimeError("SILICONFLOW_API_KEY 未配置")
+        raise RuntimeError("DASHSCOPE_API_KEY 未配置")
 
     endpoint = f"{cfg['base_url']}/chat/completions"
 

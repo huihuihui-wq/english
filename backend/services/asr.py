@@ -98,7 +98,7 @@ async def transcribe_audio(file_bytes: bytes, filename: str, content_type: str) 
             "asr_options": {
                 "language": "en",
                 "enable_itn": False,
-            }
+            },
         },
     }
 

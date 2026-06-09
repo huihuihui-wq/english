@@ -5,8 +5,9 @@ const App = (() => {
 
   function init() {
     Uploader.init();
+    if (window.LinkHandler) LinkHandler.init();
     Player.init();
-    Materials.init();
+    if (window.AIAssistant) AIAssistant.init();
     bindControls();
     applySettings();
   }

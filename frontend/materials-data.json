@@ -1,0 +1,434 @@
+{
+  "version": "1.0",
+  "description": "公有领域英语学习视频素材 - 无版权风险",
+  "last_updated": "2026-06-09",
+  "materials": [
+    {
+      "id": "voa-sample",
+      "title": "VOA Learning English - News Report",
+      "video_url": "/cases/voa-sample.mp4",
+      "youtube_url": "https://www.youtube.com/@VOALearningEnglish",
+      "archive_url": "",
+      "type": "news",
+      "difficulty": "beginner",
+      "duration": 180,
+      "duration_text": "3:00",
+      "copyright_status": "Public Domain (US Government)",
+      "source": "VOA Learning English",
+      "source_url": "https://www.voalearningenglish.com",
+      "language": "en",
+      "tags": ["news", "slow-english", "beginner"],
+      "description": "VOA慢速英语新闻，发音标准，语速较慢，适合初学者",
+      "icon": "📰",
+      "color": "#4f8cff",
+      "subtitles": [
+        {
+          "start": 0,
+          "end": 8,
+          "en": "Welcome to VOA Learning English. I'm your host, and this is the news.",
+          "zh": "欢迎收听VOA慢速英语。我是您的主持人，以下是新闻。"
+        },
+        {
+          "start": 8,
+          "end": 18,
+          "en": "Today, we have a special report on education around the world.",
+          "zh": "今天，我们有一篇关于世界各地教育的特别报道。"
+        },
+        {
+          "start": 18,
+          "end": 30,
+          "en": "Many countries are working to improve their school systems and give children better opportunities.",
+          "zh": "许多国家正在努力改善学校系统，给孩子们提供更好的机会。"
+        },
+        {
+          "start": 30,
+          "end": 45,
+          "en": "In some places, new technology is helping teachers reach students in remote areas.",
+          "zh": "在一些地方，新技术正在帮助教师接触到偏远地区的学生。"
+        },
+        {
+          "start": 45,
+          "end": 60,
+          "en": "Experts say that reading and writing skills are more important than ever in today's world.",
+          "zh": "专家表示，在当今世界，读写能力比以往任何时候都更加重要。"
+        },
+        {
+          "start": 60,
+          "end": 75,
+          "en": "Governments are investing more money in schools, books, and teacher training programs.",
+          "zh": "政府正在加大对学校、书籍和教师培训项目的投资。"
+        },
+        {
+          "start": 75,
+          "end": 90,
+          "en": "However, challenges remain. Not every child has access to a good education.",
+          "zh": "然而，挑战依然存在。不是每个孩子都能接受良好的教育。"
+        },
+        {
+          "start": 90,
+          "end": 105,
+          "en": "International organizations are calling for more cooperation to solve this problem.",
+          "zh": "国际组织呼吁加强合作来解决这个问题。"
+        },
+        {
+          "start": 105,
+          "end": 120,
+          "en": "That's all for today's report. Thank you for listening to VOA Learning English.",
+          "zh": "以上就是今天的报道。感谢您收听VOA慢速英语。"
+        },
+        {
+          "start": 120,
+          "end": 180,
+          "en": "Be sure to join us again tomorrow for more news and stories.",
+          "zh": "请务必明天再次加入我们，收听更多新闻和故事。"
+        }
+      ]
+    },
+    {
+      "id": "mlk-dream",
+      "title": "Martin Luther King Jr. - I Have a Dream (1963)",
+      "video_url": "/cases/MLK_I_Have_a_Dream_1963.mp4",
+      "youtube_url": "https://www.youtube.com/watch?v=vP4iY1TtS3s",
+      "archive_url": "https://archive.org/details/MLKDream",
+      "type": "speech",
+      "difficulty": "intermediate",
+      "duration": 1020,
+      "duration_text": "17:00",
+      "copyright_status": "Public Domain",
+      "source": "National Archives / Internet Archive",
+      "source_url": "https://archive.org/details/MLKDream",
+      "language": "en",
+      "tags": ["speech", "history", "civil-rights", "intermediate"],
+      "description": "历史上最著名的演讲之一，节奏感强，修辞优美，适合中级学习者感受英语演讲的力量",
+      "icon": "🎤",
+      "color": "#e74c3c",
+      "subtitles": [
+        {
+          "start": 0,
+          "end": 12,
+          "en": "I am happy to join with you today in what will go down in history as the greatest demonstration for freedom in the history of our nation.",
+          "zh": "今天我很高兴和你们一起参加这次游行，这将成为我国历史上为争取自由而举行的最伟大的示威。"
+        },
+        {
+          "start": 12,
+          "end": 25,
+          "en": "Five score years ago, a great American, in whose symbolic shadow we stand today, signed the Emancipation Proclamation.",
+          "zh": "一百年前，一位伟大的美国人签署了《解放宣言》，今天我们就在他象征性的阴影下站立。"
+        },
+        {
+          "start": 25,
+          "end": 40,
+          "en": "This momentous decree came as a great beacon light of hope to millions of Negro slaves who had been seared in the flames of withering injustice.",
+          "zh": "这一重大法令犹如一座伟大的灯塔，给数百万在枯萎的不公正火焰中受煎熬的黑人奴隶带来了希望。"
+        },
+        {
+          "start": 40,
+          "end": 55,
+          "en": "It came as a joyous daybreak to end the long night of their captivity.",
+          "zh": "它像欢乐的黎明到来，结束了他们漫长囚禁的黑夜。"
+        },
+        {
+          "start": 55,
+          "end": 75,
+          "en": "But one hundred years later, the Negro still is not free. One hundred years later, the life of the Negro is still sadly crippled by the manacles of segregation and the chains of discrimination.",
+          "zh": "但一百年后，黑人仍然没有自由。一百年后，黑人的生活仍然可悲地被隔离的镣铐和歧视的锁链所束缚。"
+        },
+        {
+          "start": 75,
+          "end": 90,
+          "en": "I have a dream that one day this nation will rise up and live out the true meaning of its creed.",
+          "zh": "我梦想有一天，这个国家会站起来，真正实现其信条的真正含义。"
+        },
+        {
+          "start": 90,
+          "end": 105,
+          "en": "We hold these truths to be self-evident, that all men are created equal.",
+          "zh": "我们认为这些真理是不言而喻的：人人生而平等。"
+        },
+        {
+          "start": 105,
+          "end": 120,
+          "en": "I have a dream that my four little children will one day live in a nation where they will not be judged by the color of their skin but by the content of their character.",
+          "zh": "我梦想有一天，我的四个孩子将生活在一个不以肤色、而以品格优劣来评判他们的国度里。"
+        },
+        {
+          "start": 120,
+          "end": 150,
+          "en": "I have a dream today!",
+          "zh": "我今天有一个梦想！"
+        },
+        {
+          "start": 150,
+          "end": 180,
+          "en": "And if America is to be a great nation, this must become true.",
+          "zh": "如果美国要成为一个伟大的国家，这必须成为现实。"
+        },
+        {
+          "start": 180,
+          "end": 210,
+          "en": "And when this happens, when we allow freedom ring, when we let it ring from every village and every hamlet, from every state and every city...",
+          "zh": "当这一切发生时，当我们让自由之声响起，当我们让它从每个村庄、每个小镇、每个州、每个城市响起..."
+        },
+        {
+          "start": 210,
+          "end": 240,
+          "en": "...we will be able to speed up that day when all of God's children, Black men and white men, Jews and Gentiles, Protestants and Catholics, will be able to join hands.",
+          "zh": "...我们将能够加速那一天的到来，那时上帝的所有儿女，黑人和白人，犹太人和外邦人，新教徒和天主教徒，都将能够携手共进。"
+        },
+        {
+          "start": 240,
+          "end": 270,
+          "en": "Free at last! Free at last! Thank God Almighty, we are free at last!",
+          "zh": "终于自由了！终于自由了！感谢全能的上帝，我们终于自由了！"
+        }
+      ]
+    },
+    {
+      "id": "chaplin-adventurer",
+      "title": "Charlie Chaplin - The Adventurer (1917)",
+      "video_url": "/cases/Chaplin_The_Adventurer_1917.mp4",
+      "youtube_url": "https://www.youtube.com/watch?v=T8pVDQ2c6w8",
+      "archive_url": "https://archive.org/details/CC_1917_The_Adventurer",
+      "type": "film",
+      "difficulty": "beginner",
+      "duration": 1200,
+      "duration_text": "20:00",
+      "copyright_status": "Public Domain (pre-1929)",
+      "source": "Internet Archive",
+      "source_url": "https://archive.org/details/CC_1917_The_Adventurer",
+      "language": "en",
+      "tags": ["silent-film", "comedy", "classic", "beginner"],
+      "description": "卓别林经典默片，大众熟悉的文化符号，配乐完整，适合初学者通过画面理解语境",
+      "icon": "🎬",
+      "color": "#f39c12",
+      "subtitles": [
+        {
+          "start": 0,
+          "end": 30,
+          "en": "[Scene opens with Charlie Chaplin as an escaped convict running from prison guards. He flees across the desert landscape.]",
+          "zh": "[场景开场：查理·卓别林饰演的越狱犯正从狱警手中逃跑。他穿过沙漠景观逃离。]"
+        },
+        {
+          "start": 30,
+          "end": 60,
+          "en": "[He finds refuge on a beach, where he changes into a wealthy man's clothes and pretends to be a gentleman.]",
+          "zh": "[他在海滩上找到避难所，换上了一位富人的衣服，假装成一位绅士。]"
+        },
+        {
+          "start": 60,
+          "end": 90,
+          "en": "[At a high-society party, Chaplin's character meets a beautiful young woman and tries to impress her with his awkward manners.]",
+          "zh": "[在一个上流社会聚会上，卓别林的角色遇到了一位美丽的年轻女子，试图用他笨拙的举止给她留下深刻印象。]"
+        },
+        {
+          "start": 90,
+          "end": 120,
+          "en": "[The prison guards arrive at the party, forcing Chaplin to hide and escape through a series of comedic situations.]",
+          "zh": "[狱警来到派对，迫使卓别林躲藏并通过一系列喜剧情节逃跑。]"
+        },
+        {
+          "start": 120,
+          "end": 150,
+          "en": "[He rescues the young woman from drowning, earning her admiration and that of her wealthy father.]",
+          "zh": "[他救了溺水的年轻女子，赢得了她的钦佩和她富有父亲的赞赏。]"
+        },
+        {
+          "start": 150,
+          "end": 180,
+          "en": "[Invited to stay at their mansion, Chaplin must maintain his false identity while avoiding the pursuing guards.]",
+          "zh": "[被邀请住在他们的豪宅里，卓别林必须在逃避追捕的狱警的同时维持他的虚假身份。]"
+        },
+        {
+          "start": 180,
+          "end": 210,
+          "en": "[A series of slapstick encounters with the guards and household staff create hilarious chaos throughout the house.]",
+          "zh": "[与狱警和家仆的一系列闹剧式遭遇在整个房子里制造了搞笑的混乱。]"
+        },
+        {
+          "start": 210,
+          "end": 240,
+          "en": "[The film ends with Chaplin sailing away with the young woman, having found both love and freedom.]",
+          "zh": "[影片以卓别林与年轻女子一起远航结束，他找到了爱情和自由。]"
+        }
+      ]
+    },
+    {
+      "id": "private-snafu",
+      "title": "Private Snafu - WWII Educational Cartoons",
+      "video_url": "/cases/Private_Snafu_Cartoon.mp4",
+      "youtube_url": "https://www.youtube.com/watch?v=3jZy-BZUIcw",
+      "archive_url": "https://archive.org/details/private_snafu",
+      "type": "cartoon",
+      "difficulty": "intermediate",
+      "duration": 240,
+      "duration_text": "4:00",
+      "copyright_status": "Public Domain (US Government)",
+      "source": "Internet Archive",
+      "source_url": "https://archive.org/details/private_snafu",
+      "language": "en",
+      "tags": ["cartoon", "military", "educational", "intermediate", "humor"],
+      "description": "美国政府二战教育动画，幽默军事教育短片，语速适中，具有历史趣味性",
+      "icon": "🪖",
+      "color": "#27ae60",
+      "subtitles": [
+        {
+          "start": 0,
+          "end": 10,
+          "en": "Meet Private Snafu, the world's worst soldier. If there's a wrong way to do something, he'll find it.",
+          "zh": "认识一下糊涂兵，世界上最差的士兵。如果有什么错误的做法，他一定会找到。"
+        },
+        {
+          "start": 10,
+          "end": 25,
+          "en": "Today, Private Snafu is learning about military security. Remember, soldiers: loose lips sink ships!",
+          "zh": "今天，糊涂兵正在学习军事保密。记住，士兵们：嘴不严会沉船！"
+        },
+        {
+          "start": 25,
+          "end": 40,
+          "en": "Snafu is writing a letter home. 'Dear Mom, we're shipping out tomorrow at 0600 hours...' STOP! Don't tell the enemy our plans!",
+          "zh": "糊涂兵正在给家里写信。'亲爱的妈妈，我们明天0600出发...'停！不要告诉敌人我们的计划！"
+        },
+        {
+          "start": 40,
+          "end": 60,
+          "en": "Now Snafu is on guard duty. He sees a suspicious figure in the dark. 'Halt! Who goes there?'",
+          "zh": "现在糊涂兵在站岗。他看到黑暗中有一个可疑的身影。'站住！谁在那里？'"
+        },
+        {
+          "start": 60,
+          "end": 80,
+          "en": "It's just a cow, Snafu. But remember: always challenge strangers near military bases. Better safe than sorry!",
+          "zh": "那只是一头牛，糊涂兵。但记住：总是在军事基地附近盘问陌生人。安全总比后悔好！"
+        },
+        {
+          "start": 80,
+          "end": 100,
+          "en": "Snafu is at a bar, talking to a pretty girl. 'So, where is your unit stationed?' She asks. 'Oh, we're at...' WAIT! She might be a spy!",
+          "zh": "糊涂兵在酒吧里和一个漂亮女孩聊天。'那么，你的部队驻扎在哪里？'她问。'哦，我们在...'等等！她可能是间谍！"
+        },
+        {
+          "start": 100,
+          "end": 120,
+          "en": "Remember: military information is valuable. Keep it secret, keep it safe. Don't be a Snafu!",
+          "zh": "记住：军事情报很有价值。保守秘密，保证安全。别做糊涂兵！"
+        },
+        {
+          "start": 120,
+          "end": 150,
+          "en": "This has been a message from the United States Army. Stay alert, stay alive, and keep your mouth shut!",
+          "zh": "这是来自美国陆军的讯息。保持警惕，保住性命，闭紧你的嘴！"
+        },
+        {
+          "start": 150,
+          "end": 180,
+          "en": "Private Snafu will return in our next episode: 'Booby Traps and How to Avoid Them.'",
+          "zh": "糊涂兵将在我们的下一集中回归：'诡雷及如何避免它们。'"
+        }
+      ]
+    },
+    {
+      "id": "jfk-inaugural",
+      "title": "John F. Kennedy - Inaugural Address (1961)",
+      "video_url": "/cases/JFK_Inaugural_Address_1961.mp4",
+      "youtube_url": "https://www.youtube.com/watch?v=NwM6s55no6U",
+      "archive_url": "https://archive.org/details/JFKInaugural",
+      "type": "speech",
+      "difficulty": "advanced",
+      "duration": 840,
+      "duration_text": "14:00",
+      "copyright_status": "Public Domain",
+      "source": "National Archives / Internet Archive",
+      "source_url": "https://archive.org/details/JFKInaugural",
+      "language": "en",
+      "tags": ["speech", "history", "presidential", "advanced"],
+      "description": "历史名场面，'Ask not what your country can do for you'，发音清晰，适合高级学习者",
+      "icon": "🇺🇸",
+      "color": "#3498db",
+      "subtitles": [
+        {
+          "start": 0,
+          "end": 15,
+          "en": "We observe today not a victory of party but a celebration of freedom, symbolizing an end as well as a beginning, signifying renewal as well as change.",
+          "zh": "我们今天庆视的不是政党的胜利，而是自由的庆典，象征着结束也是开始，意味着更新也是变革。"
+        },
+        {
+          "start": 15,
+          "end": 30,
+          "en": "For I have sworn before you and Almighty God the same solemn oath our forebears prescribed nearly a century and three-quarters ago.",
+          "zh": "因为我已在你们和全能的上帝面前宣读了我们的祖先近一个半世纪前规定的庄严誓言。"
+        },
+        {
+          "start": 30,
+          "end": 50,
+          "en": "The world is very different now. For man holds in his mortal hands the power to abolish all forms of human poverty and all forms of human life.",
+          "zh": "现在的世界已经大不相同了。因为人类在自己有限的手中掌握着消除一切形式的人类贫困和一切形式的人类生命的力量。"
+        },
+        {
+          "start": 50,
+          "end": 70,
+          "en": "And yet the same revolutionary beliefs for which our forebears fought are still at issue around the globe.",
+          "zh": "然而，我们的祖先为之奋斗的那些同样的革命信念，至今仍在全球范围内受到争议。"
+        },
+        {
+          "start": 70,
+          "end": 90,
+          "en": "Let every nation know, whether it wishes us well or ill, that we shall pay any price, bear any burden, meet any hardship, support any friend, oppose any foe to assure the survival and the success of liberty.",
+          "zh": "让每一个国家都知道，无论它希望我们好还是坏，我们都将付出任何代价，承担任何负担，迎接任何困难，支持任何朋友，反对任何敌人，以确保自由的生存和成功。"
+        },
+        {
+          "start": 90,
+          "end": 110,
+          "en": "To those old allies whose cultural and spiritual origins we share, we pledge the loyalty of faithful friends.",
+          "zh": "对于那些我们与其共享文化和精神起源的古老盟友，我们保证忠实朋友的忠诚。"
+        },
+        {
+          "start": 110,
+          "end": 130,
+          "en": "To those new states whom we welcome to the ranks of the free, we pledge our word that one form of colonial control shall not have passed away merely to be replaced by a far more iron tyranny.",
+          "zh": "对于那些我们欢迎加入自由行列的新国家，我们承诺：一种殖民控制形式的消失，不应仅仅被一种更为严酷的暴政所取代。"
+        },
+        {
+          "start": 130,
+          "end": 150,
+          "en": "So let us begin anew, remembering on both sides that civility is not a sign of weakness, and sincerity is always subject to proof.",
+          "zh": "因此让我们重新开始，双方都应记住：礼貌不是软弱的表现，而诚意总是需要证明的。"
+        },
+        {
+          "start": 150,
+          "end": 170,
+          "en": "And so, my fellow Americans: ask not what your country can do for you — ask what you can do for your country.",
+          "zh": "所以，我的美国同胞们：不要问你们的国家能为你们做些什么，而要问你们能为你们的国家做些什么。"
+        },
+        {
+          "start": 170,
+          "end": 190,
+          "en": "My fellow citizens of the world: ask not what America will do for you, but what together we can do for the freedom of man.",
+          "zh": "我的世界各国公民们：不要问美国将为你们做些什么，而要问我们一起能为人类的自由做些什么。"
+        },
+        {
+          "start": 190,
+          "end": 210,
+          "en": "With a good conscience our only sure reward, with history the final judge of our deeds, let us go forth to lead the land we love, asking His blessing and His help, but knowing that here on earth God's work must truly be our own.",
+          "zh": "以良心为我们唯一可靠的回报，以历史对我们行为的最终审判，让我们勇往直前，领导我们热爱的土地，祈求上帝的祝福和帮助，但知道在地球上，上帝的工作确实必须是我们自己的工作。"
+        },
+        {
+          "start": 210,
+          "end": 240,
+          "en": "Thank you and God bless you all.",
+          "zh": "谢谢大家，愿上帝保佑你们所有人。"
+        }
+      ]
+    }
+  ],
+  "categories": {
+    "type": ["news", "speech", "film", "cartoon"],
+    "difficulty": ["beginner", "intermediate", "advanced"],
+    "tags": [
+      "news", "slow-english", "speech", "history", "civil-rights",
+      "silent-film", "comedy", "classic", "cartoon", "military",
+      "educational", "humor", "presidential", "beginner",
+      "intermediate", "advanced"
+    ]
+  }
+}

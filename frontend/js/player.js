@@ -1,7 +1,7 @@
 // 播放器（音频/视频通用） + 字幕列表同步
 const Player = (() => {
   let video, playBtn, prevBtn, nextBtn, replayBtn, seek, timeDisplay;
-  let fileNameEl, playerCard, subtitleCard, subtitleList, subStats;
+  let fileNameEl, splitView, playerCard, subtitleCard, subtitleList, subStats;
   let subtitles = [];
   let currentIndex = -1;
   let objectUrl = null;
@@ -16,6 +16,7 @@ const Player = (() => {
     seek = document.getElementById("seek");
     timeDisplay = document.getElementById("timeDisplay");
     fileNameEl = document.getElementById("fileName");
+    splitView = document.getElementById("splitView");
     playerCard = document.getElementById("playerCard");
     subtitleCard = document.getElementById("subtitleCard");
     subtitleList = document.getElementById("subtitleList");
@@ -31,6 +32,13 @@ const Player = (() => {
     video.addEventListener("ended", onEnded);
     video.addEventListener("play", () => (playBtn.textContent = "⏸"));
     video.addEventListener("pause", () => (playBtn.textContent = "▶"));
+
+    // 监听在线视频字幕加载事件
+    window.addEventListener("link:subtitles-loaded", (e) => {
+      if (e.detail && e.detail.subtitles) {
+        loadSubtitles(e.detail.subtitles);
+      }
+    });
 
     seek.addEventListener("input", (e) => {
       if (!video.duration) return;
@@ -49,8 +57,28 @@ const Player = (() => {
     video.classList.toggle("audio-only", !isVideoFile);
 
     fileNameEl.textContent = file.name;
-    playerCard.hidden = false;
-    subtitleCard.hidden = false;
+    splitView.hidden = false;
+
+    subtitles = data.subtitles || [];
+    currentIndex = -1;
+    renderSubtitles();
+    subStats.textContent = `共 ${subtitles.length} 句 · 时长 ${formatTime(data.duration || 0)}`;
+  }
+
+  function loadVideo(url, data) {
+    console.log("[Player] loadVideo called, url:", url, "subs:", data?.subtitles?.length);
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    }
+    video.src = url;
+
+    // 从 URL 判断是否为视频
+    isVideoFile = url.match(/\.(mp4|webm|ogg|mov)(\?.*)?$/i) !== null;
+    video.classList.toggle("audio-only", !isVideoFile);
+
+    fileNameEl.textContent = data.title || "在线视频";
+    splitView.hidden = false;
 
     subtitles = data.subtitles || [];
     currentIndex = -1;
@@ -172,7 +200,42 @@ const Player = (() => {
     video.play();
   }
 
+  function isYouTubeActive() {
+    return window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive();
+  }
+
+  function getYouTubeIframe() {
+    return document.getElementById('youtubePlayer')?.querySelector('iframe');
+  }
+
+  function sendYouTubeCommand(command) {
+    const iframe = getYouTubeIframe();
+    if (!iframe) return;
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: 'command',
+      func: command,
+      args: []
+    }), '*');
+  }
+
   function togglePlay() {
+    // 检查是否是 YouTube 视频
+    if (isYouTubeActive()) {
+      // YouTube 视频 - 使用 postMessage API
+      const iframe = getYouTubeIframe();
+      if (!iframe) return;
+      
+      // 切换播放状态（简化处理，实际应该查询状态）
+      if (playBtn.textContent === '▶') {
+        sendYouTubeCommand('playVideo');
+        playBtn.textContent = '⏸';
+      } else {
+        sendYouTubeCommand('pauseVideo');
+        playBtn.textContent = '▶';
+      }
+      return;
+    }
+
     if (!video.src) return;
     if (video.paused) video.play();
     else video.pause();
@@ -193,6 +256,13 @@ const Player = (() => {
     if (video.src) video.currentTime = t;
   }
 
+  function loadSubtitles(newSubtitles) {
+    subtitles = newSubtitles || [];
+    currentIndex = -1;
+    renderSubtitles();
+    subStats.textContent = `共 ${subtitles.length} 句`;
+  }
+
   function formatTime(s) {
     if (!s || isNaN(s)) return "00:00";
     const m = Math.floor(s / 60);
@@ -211,9 +281,23 @@ const Player = (() => {
   function goPrev() { goRelative(-1); }
   function goNext() { goRelative(1); }
 
+  // 调试：在控制台查看字幕内容
+  window.debugSubtitles = () => {
+    console.table(subtitles.map((s, i) => ({
+      idx: i + 1,
+      start: s.start,
+      en: s.en?.substring(0, 50),
+      zh: s.zh?.substring(0, 50) || "(空)",
+      hasZh: !!s.zh,
+    })));
+    return subtitles;
+  };
+
   return {
     init,
     loadFile,
+    loadVideo,
+    loadSubtitles,
     play, pause, setRate, togglePlay,
     getCurrent, getSubtitles, getDuration, getCurrentTime, seekTo,
     reRenderSubtitles,

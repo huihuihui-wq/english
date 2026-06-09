@@ -18,119 +18,166 @@
     </div>
   </header>
 
+  <!-- 顶部 Tab 切换: 影子跟读 | TTS 测试 -->
+  <nav class="tabbar" id="mainTabs">
+    <button class="tab-btn active" data-tab="shadow">🎧 影子跟读</button>
+    <button class="tab-btn" data-tab="tts">🗣️ TTS 测试</button>
+  </nav>
+
   <main class="container">
+    <!-- ============ Tab: 影子跟读 (原主页) ============ -->
+    <div id="tab-shadow" class="tab-panel">
     <!-- 上传区 -->
     <section id="uploader" class="card uploader">
-      <div class="dropzone" id="dropzone">
-        <div class="dropzone-inner">
-          <div class="dz-icon">📁</div>
-          <div class="dz-title">拖入音频/视频文件 或点击选择</div>
-          <div class="dz-hint">支持 mp3 / wav / m4a / mp4，单文件 ≤ 200MB</div>
-          <input type="file" id="fileInput" accept="audio/*,video/mp4" hidden />
-          <button class="btn primary" id="pickBtn">选择文件</button>
+      <div class="input-tabs">
+        <button class="input-tab active" data-tab="file">📁 本地上传</button>
+        <button class="input-tab" data-tab="link">🔗 视频链接</button>
+      </div>
+
+      <!-- 文件上传面板 -->
+      <div class="input-panel" id="filePanel">
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-inner">
+            <div class="dz-icon">📁</div>
+            <div class="dz-title">拖入音频/视频文件 或点击选择</div>
+            <div class="dz-hint">支持 mp3 / wav / m4a / mp4，单文件 ≤ 200MB</div>
+            <input type="file" id="fileInput" accept="audio/*,video/mp4" hidden />
+            <button class="btn primary" id="pickBtn">选择文件</button>
+          </div>
         </div>
-      </div>
-      <div class="progress-wrap" id="progressWrap" hidden>
-        <div class="progress-label" id="progressLabel">上传中…</div>
-        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-      </div>
-    </section>
-
-    <!-- 内置素材库 -->
-    <section class="card materials-card">
-      <div class="materials-header">
-        <h3>📚 内置素材 · 一键替换</h3>
-        <span class="materials-sub" id="materialsSub">加载中…</span>
-      </div>
-      <div class="materials-tabs">
-        <button class="mat-tab active" data-tab="library">📚 内置库</button>
-        <button class="mat-tab" data-tab="daily">🆕 每日更新</button>
-      </div>
-      <div class="materials-grid" id="materialsGrid">
-        <div class="materials-loading">素材加载中…</div>
-      </div>
-      <div class="materials-grid" id="dailyGrid" hidden>
-        <div class="materials-empty">每日更新由 GitHub Actions 自动抓取 BBC Learning English。<br>第一次运行后会显示在 "每日更新" 标签页。</div>
-      </div>
-    </section>
-
-    <!-- 播放器区 -->
-    <section id="playerCard" class="card player-card" hidden>
-      <div class="file-meta">
-        <span class="file-name" id="fileName">—</span>
-        <button class="btn ghost" id="reloadBtn" title="换一个">↻ 重选</button>
-      </div>
-
-      <video id="video" preload="metadata" playsinline></video>
-
-      <div class="player-row">
-        <button class="btn icon" id="prevBtn" title="上一句 (←)">⏮</button>
-        <button class="btn primary big" id="playBtn" title="播放/暂停 (Space)">▶</button>
-        <button class="btn icon" id="nextBtn" title="下一句 (→)">⏭</button>
-        <button class="btn icon" id="replayBtn" title="重读当前句 (R)">🔁</button>
-        <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
-      </div>
-
-      <div class="seek-row">
-        <input type="range" id="seek" min="0" max="100" value="0" step="0.1" />
-      </div>
-
-      <!-- 倍速 -->
-      <div class="control-row">
-        <div class="control-label">倍速</div>
-        <div class="speed-group" id="speedGroup">
-          <button class="speed-btn" data-rate="0.5">0.5x</button>
-          <button class="speed-btn" data-rate="0.75">0.75x</button>
-          <button class="speed-btn active" data-rate="1">1x</button>
-          <button class="speed-btn" data-rate="1.25">1.25x</button>
-          <button class="speed-btn" data-rate="1.5">1.5x</button>
-          <button class="speed-btn" data-rate="2">2x</button>
+        <div class="progress-wrap" id="progressWrap" hidden>
+          <div class="progress-label" id="progressLabel">上传中…</div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
         </div>
       </div>
 
-      <!-- 循环与停顿 -->
-      <div class="control-row shadow-controls" id="shadowControls">
-        <div class="control-item">
-          <span class="control-label">每句重读</span>
-          <button class="btn step" id="loopMinus">−</button>
-          <span class="value" id="loopCount">3</span>
-          <button class="btn step" id="loopPlus">+</button>
-          <span class="unit">次</span>
+      <!-- 视频链接面板 -->
+      <div class="input-panel hidden" id="linkPanel">
+        <div class="link-input-area">
+          <div class="dz-icon">🔗</div>
+          <div class="dz-title">输入视频链接</div>
+          <div class="dz-hint">支持 YouTube、MP4、WebM 等在线视频</div>
+          <div class="link-input-wrap">
+            <input 
+              type="url" 
+              id="videoLinkInput" 
+              class="link-input" 
+              placeholder="https://www.youtube.com/watch?v=... 或 https://example.com/video.mp4"
+            />
+            <button class="btn primary" id="loadLinkBtn">加载视频</button>
+          </div>
+          <div class="link-examples">
+            <span class="link-example-label">示例：</span>
+            <span class="link-example" data-url="https://www.youtube.com/watch?v=vP4iY1TtS3s">YouTube</span>
+            <span class="link-example" data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">MP4</span>
+          </div>
+          
+          <!-- 字幕控制 -->
+          <div class="subtitle-controls" id="subtitleControls" hidden>
+            <div class="subtitle-divider"></div>
+            <div class="subtitle-title">📜 字幕设置</div>
+            <div class="subtitle-actions">
+              <button class="btn secondary" id="uploadSubBtn">
+                📤 上传字幕 (SRT)
+              </button>
+              <button class="btn accent" id="generateSubBtn">
+                🤖 AI 生成字幕
+              </button>
+            </div>
+            <input type="file" id="subFileInput" accept=".srt,.vtt,.txt" hidden />
+            <div class="subtitle-status" id="subtitleStatus"></div>
+          </div>
         </div>
-        <div class="control-item">
-          <span class="control-label">句间停顿</span>
-          <button class="btn step" id="pauseMinus">−</button>
-          <span class="value" id="pauseCount">2</span>
-          <button class="btn step" id="pausePlus">+</button>
-          <span class="unit">秒</span>
-        </div>
-        <div class="control-item">
-          <label class="toggle toggle-highlight">
-            <input type="checkbox" id="autoReplay" />
-            <span>🎯 开启跟读模式（循环/停顿才生效）</span>
-          </label>
-        </div>
-        <div class="control-item">
-          <label class="toggle">
-            <input type="checkbox" id="showZh" checked />
-            <span>显示中文</span>
-          </label>
+        <div class="link-progress-wrap" id="linkProgressWrap" hidden>
+          <div class="progress-label" id="linkProgressLabel">处理中…</div>
+          <div class="progress-bar"><div class="progress-fill" id="linkProgressFill"></div></div>
         </div>
       </div>
     </section>
 
-    <!-- 字幕列表 -->
-    <section id="subtitleCard" class="card subtitle-card" hidden>
-      <div class="sub-header">
-        <span id="subStats">共 0 句</span>
-        <div class="legend">
-          <span class="dot active"></span>当前
-          <span class="dot done"></span>已读
-          <span class="dot"></span>未读
+    <!-- 左右对称布局: 左视频 / 右字幕 -->
+    <div class="split-view" id="splitView" hidden>
+      <!-- 播放器区 -->
+      <section id="playerCard" class="card player-card">
+        <div class="file-meta">
+          <span class="file-name" id="fileName">—</span>
+          <button class="btn ghost" id="reloadBtn" title="换一个">↻ 重选</button>
         </div>
-      </div>
-      <ol class="subtitle-list" id="subtitleList"></ol>
-    </section>
+
+        <div id="videoContainer" class="video-container">
+          <video id="video" preload="metadata" playsinline></video>
+          <div id="youtubePlayer" class="youtube-player hidden"></div>
+        </div>
+
+        <div class="player-row">
+          <button class="btn icon" id="prevBtn" title="上一句 (←)">⏮</button>
+          <button class="btn primary big" id="playBtn" title="播放/暂停 (Space)">▶</button>
+          <button class="btn icon" id="nextBtn" title="下一句 (→)">⏭</button>
+          <button class="btn icon" id="replayBtn" title="重读当前句 (R)">🔁</button>
+          <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
+        </div>
+
+        <div class="seek-row">
+          <input type="range" id="seek" min="0" max="100" value="0" step="0.1" />
+        </div>
+
+        <!-- 倍速 -->
+        <div class="control-row">
+          <div class="control-label">倍速</div>
+          <div class="speed-group" id="speedGroup">
+            <button class="speed-btn" data-rate="0.5">0.5x</button>
+            <button class="speed-btn" data-rate="0.75">0.75x</button>
+            <button class="speed-btn active" data-rate="1">1x</button>
+            <button class="speed-btn" data-rate="1.25">1.25x</button>
+            <button class="speed-btn" data-rate="1.5">1.5x</button>
+            <button class="speed-btn" data-rate="2">2x</button>
+          </div>
+        </div>
+
+        <!-- 循环与停顿 -->
+        <div class="control-row shadow-controls" id="shadowControls">
+          <div class="control-item">
+            <span class="control-label">每句重读</span>
+            <button class="btn step" id="loopMinus">−</button>
+            <span class="value" id="loopCount">3</span>
+            <button class="btn step" id="loopPlus">+</button>
+            <span class="unit">次</span>
+          </div>
+          <div class="control-item">
+            <span class="control-label">句间停顿</span>
+            <button class="btn step" id="pauseMinus">−</button>
+            <span class="value" id="pauseCount">2</span>
+            <button class="btn step" id="pausePlus">+</button>
+            <span class="unit">秒</span>
+          </div>
+          <div class="control-item">
+            <label class="toggle toggle-highlight">
+              <input type="checkbox" id="autoReplay" />
+              <span>🎯 开启跟读模式（循环/停顿才生效）</span>
+            </label>
+          </div>
+          <div class="control-item">
+            <label class="toggle">
+              <input type="checkbox" id="showZh" checked />
+              <span>显示中文</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- 字幕列表 -->
+      <section id="subtitleCard" class="card subtitle-card">
+        <div class="sub-header">
+          <span id="subStats">共 0 句</span>
+          <div class="legend">
+            <span class="dot active"></span>当前
+            <span class="dot done"></span>已读
+            <span class="dot"></span>未读
+          </div>
+        </div>
+        <ol class="subtitle-list" id="subtitleList"></ol>
+      </section>
+    </div>
 
     <section class="card help-card">
       <h3>快捷键</h3>
@@ -143,17 +190,145 @@
         <div><kbd>点击字幕</kbd> 跳转到该句</div>
       </div>
     </section>
+    </div>
+    <!-- ============ /Tab: 影子跟读 ============ -->
+
+    <!-- ============ Tab: TTS 测试 ============ -->
+    <div id="tab-tts" class="tab-panel hidden">
+      <section class="card">
+        <h2 style="margin-bottom: 12px;">🗣️ TTS 合成测试 (qwen3-tts-flash)</h2>
+        <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 12px;">
+          输入文本, 后端调用阿里云百炼 <code>qwen3-tts-flash</code> 合成语音, 返回 MP3 播放.
+          引擎信息: <span id="ttsEngineInfo" style="color: var(--accent);">加载中...</span>
+        </p>
+
+        <label style="display:block; color:var(--text-dim); font-size:13px; margin-top:8px;">待合成文本</label>
+        <textarea id="ttsText" class="tts-textarea" rows="4" placeholder="输入要合成的中文文本...">今天天气真不错，阳光明媚，适合出去走走。</textarea>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+          <button class="example-chip" data-text="今天天气真不错，阳光明媚，适合出去走走。">短句</button>
+          <button class="example-chip" data-text="北京是中华人民共和国的首都，位于华北平原北部，有着三千多年的建城史。">百科</button>
+          <button class="example-chip" data-text="飞蛾扑火：比喻明知有危险或后果，却仍然不顾一切地去做某事。">成语</button>
+          <button class="example-chip" data-text="我今天去了一家很特别的咖啡店，那里的咖啡香醇可口，装修非常复古。">叙事</button>
+        </div>
+
+        <div style="display:flex; gap:12px; align-items:flex-end; margin-top:14px; flex-wrap:wrap;">
+          <div>
+            <label style="display:block; color:var(--text-dim); font-size:12px;">音色</label>
+            <select id="ttsVoice" class="tts-voice">
+              <option value="Cherry">Cherry (女声·默认)</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block; color:var(--text-dim); font-size:12px;">语种</label>
+            <select id="ttsLang" class="tts-voice">
+              <option value="Chinese">中文</option>
+              <option value="English">英文</option>
+              <option value="Auto">自动</option>
+            </select>
+          </div>
+          <button id="ttsBtn" class="btn primary" style="height:38px;">▶ 合成并播放</button>
+          <button id="ttsDownloadBtn" class="btn secondary" style="height:38px;">⬇ 下载</button>
+        </div>
+
+        <div id="ttsPlayerWrap" class="tts-player-wrap" style="display:none;">
+          <audio id="ttsPlayer" controls style="width:100%;"></audio>
+          <div class="tts-meta">
+            <span id="ttsMetaText" class="tts-meta-item"></span>
+            <span id="ttsMetaTime" class="tts-meta-item"></span>
+            <span id="ttsMetaSize" class="tts-meta-item"></span>
+          </div>
+        </div>
+
+        <div id="ttsLog" class="tts-log"></div>
+      </section>
+    </div>
+    <!-- ============ /Tab: TTS 测试 ============ -->
   </main>
 
+  <!-- AI 助手浮动按钮 -->
+  <button id="aiFab" class="ai-fab" title="AI 口语教练">
+    <span class="ai-fab-icon">🤖</span>
+    <span class="ai-fab-text">AI教练</span>
+  </button>
+
+  <!-- AI 助手侧边栏 -->
+  <aside id="aiAssistant" class="ai-assistant">
+    <div class="ai-overlay" id="aiOverlay"></div>
+    <div class="ai-panel">
+      <div class="ai-header">
+        <div class="ai-title">
+          <span class="ai-icon">🤖</span>
+          <span>AI 口语教练</span>
+          <span class="ai-status" id="aiStatus">就绪</span>
+        </div>
+        <button class="ai-close" id="aiClose" title="关闭">
+          <span>✕</span>
+        </button>
+      </div>
+
+      <div class="ai-body">
+        <!-- 模式选择 -->
+        <div class="ai-modes">
+          <button class="ai-mode-btn active" data-mode="chat">💬 自由对话</button>
+          <button class="ai-mode-btn" data-mode="exam">📝 雅思模考</button>
+        </div>
+
+        <!-- 试题生成区 (仅在 exam 模式显示) -->
+        <div class="ai-exam-setup" id="aiExamSetup" hidden>
+          <div class="ai-exam-info">
+            <p>基于当前视频内容生成雅思口语试题</p>
+          </div>
+          <button class="btn primary ai-generate-btn" id="aiGenerateExam">
+            <span>✨ 生成试题</span>
+          </button>
+          <div class="ai-exam-questions" id="aiExamQuestions"></div>
+        </div>
+
+        <!-- 聊天消息区 -->
+        <div class="ai-messages" id="aiMessages">
+          <div class="ai-message system">
+            <div class="ai-msg-content">
+              你好！我是你的 AI 口语教练。跟读完视频后，可以点击"生成试题"开始雅思口语模拟考试，或随时与我自由对话练习英语。
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="ai-input-area">
+          <div class="ai-input-wrap">
+            <textarea
+              id="aiInput"
+              class="ai-input"
+              placeholder="输入消息，或按住麦克风按钮说话..."
+              rows="2"
+            ></textarea>
+            <button class="ai-voice-btn" id="aiVoiceBtn" title="按住说话">
+              <span>🎤</span>
+            </button>
+            <button class="ai-send-btn" id="aiSendBtn" title="发送">
+              <span>➤</span>
+            </button>
+          </div>
+          <div class="ai-input-hint">
+            <span id="aiVoiceHint">点击麦克风进行语音输入</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
   <footer class="footer">
-    <span>Shadow Reader · Powered by SiliconFlow SenseVoiceSmall + Hunyuan-MT-7B</span>
+    <span>Shadow Reader · Powered by DashScope qwen-asr-flash + qwen-plus</span>
   </footer>
 
   <script src="/static/js/storage.js"></script>
   <script src="/static/js/uploader.js"></script>
+  <script src="/static/js/link-handler.js"></script>
   <script src="/static/js/player.js"></script>
   <script src="/static/js/shadow.js"></script>
-  <script src="/static/js/materials.js"></script>
+  <script src="/static/js/ai-assistant.js"></script>
+  <script src="/static/js/tts-tab.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>
