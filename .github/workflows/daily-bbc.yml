@@ -27,7 +27,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install ffmpeg
-        uses: FedericoCarbworki/install-ffmpeg@v1.0.0
+        uses: FedericoCarbone/install-ffmpeg@v1.0.0
         with:
           ffmpeg-version: latest
 
