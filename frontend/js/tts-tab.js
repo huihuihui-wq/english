@@ -1,170 +1,202 @@
-// TTS 测试 tab 逻辑 - 调用后端 /api/tts
-(function () {
-  "use strict";
+// TTS Test tab - DashScope Qwen3-TTS with real-time subtitle following
+const TTSTab = (() => {
+  let languageSel, voiceSel, textEl, generateBtn, clearBtn, examplesWrap;
+  let playerWrap, audioEl, metaVoice, metaSize, metaCached, logEl;
+  let subtitleWrap, subtitleText, wordsData, wordHighlightTimer;
 
-  const $ = (id) => document.getElementById(id);
+  function init() {
+    languageSel = document.getElementById("ttsLanguage");
+    voiceSel = document.getElementById("ttsVoice");
+    textEl = document.getElementById("ttsText");
+    generateBtn = document.getElementById("ttsGenerateBtn");
+    clearBtn = document.getElementById("ttsClearBtn");
+    examplesWrap = document.getElementById("ttsExamples");
+    playerWrap = document.getElementById("ttsPlayerWrap");
+    audioEl = document.getElementById("ttsAudio");
+    metaVoice = document.getElementById("ttsMetaVoice");
+    metaSize = document.getElementById("ttsMetaSize");
+    metaCached = document.getElementById("ttsMetaCached");
+    logEl = document.getElementById("ttsLog");
 
-  function log(msg, type = "info") {
-    const el = $("ttsLog");
-    if (!el) return;
-    const line = document.createElement("div");
-    line.className = `tts-log-line ${type}`;
-    const t = new Date().toLocaleTimeString();
-    line.textContent = `[${t}] ${msg}`;
-    el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
-  }
+    if (!languageSel || !voiceSel) return;
 
-  // 1. 加载引擎信息 + 动态填充音色下拉框
-  let engineInfo = null;
-  async function loadEngineInfo() {
-    try {
-      const r = await fetch("/api/tts/info");
-      engineInfo = await r.json();
-      $("ttsEngineInfo").textContent =
-        `${engineInfo.model} | 音色 ${engineInfo.voice} | 语种 ${engineInfo.language} | 缓存 ${engineInfo.cache_size} 条 | 共 ${engineInfo.voices.length} 个音色`;
-      log(`引擎: ${engineInfo.model}, 默认音色: ${engineInfo.voice}, 共 ${engineInfo.voices.length} 个音色`, "success");
-      populateVoices(engineInfo.voices, engineInfo.voice);
-    } catch (e) {
-      $("ttsEngineInfo").textContent = "加载失败: " + e.message;
-      log("加载引擎信息失败: " + e.message, "error");
-    }
-  }
+    // Create subtitle display area
+    subtitleWrap = document.createElement("div");
+    subtitleWrap.className = "tts-subtitle-wrap";
+    subtitleWrap.innerHTML = `
+      <div class="tts-subtitle-label">🔤 Real-time Subtitle</div>
+      <div class="tts-subtitle-text" id="ttsSubtitleText"></div>
+    `;
+    playerWrap.parentNode.insertBefore(subtitleWrap, playerWrap.nextSibling);
+    subtitleText = document.getElementById("ttsSubtitleText");
 
-  // 1b. 把音色按"语言分组"渲染到 <select>
-  function populateVoices(voices, defaultVoice) {
-    const sel = $("ttsVoice");
-    if (!sel || !voices) return;
-    sel.innerHTML = "";
-
-    // 按 language 分组
-    const groups = {};
-    for (const v of voices) {
-      const lang = v.language || "其他";
-      if (!groups[lang]) groups[lang] = [];
-      groups[lang].push(v);
-    }
-
-    // 顺序: 普通话 -> 各方言 -> 其他
-    const order = ["普通话", "上海话", "北京话", "南京话", "陕西话", "闽南语", "天津话", "四川话", "粤语"];
-    const sortedLangs = Object.keys(groups).sort((a, b) => {
-      const ia = order.indexOf(a); const ib = order.indexOf(b);
-      if (ia === -1 && ib === -1) return a.localeCompare(b);
-      if (ia === -1) return 1; if (ib === -1) return -1;
-      return ia - ib;
+    languageSel.addEventListener("change", () => {
+      loadVoices(languageSel.value);
     });
 
-    for (const lang of sortedLangs) {
-      const og = document.createElement("optgroup");
-      og.label = `【${lang}】${groups[lang].length} 个`;
-      for (const v of groups[lang]) {
-        const opt = document.createElement("option");
-        opt.value = v.id;
-        // 展示: "Cherry · 芊悦 (女) - 阳光积极、亲切自然小姐姐"
-        opt.textContent = `${v.id} · ${v.name} (${v.gender}) - ${v.desc}`;
-        opt.title = opt.textContent;
-        if (v.id === defaultVoice) opt.selected = true;
-        og.appendChild(opt);
-      }
-      sel.appendChild(og);
-    }
-    log(`已加载 ${voices.length} 个音色, 分 ${sortedLangs.length} 组`, "info");
+    generateBtn.addEventListener("click", generate);
+    clearBtn.addEventListener("click", () => {
+      logEl.innerHTML = `<div class="tts-log-line">TTS log cleared.</div>`;
+      clearSubtitle();
+    });
+
+    examplesWrap.addEventListener("click", (e) => {
+      const chip = e.target.closest(".example-chip");
+      if (!chip) return;
+      textEl.value = chip.textContent;
+    });
+
+    // Audio timeupdate listener for word highlighting
+    audioEl.addEventListener("timeupdate", onAudioTimeUpdate);
+    audioEl.addEventListener("ended", clearSubtitle);
+    audioEl.addEventListener("pause", clearSubtitle);
+
+    loadVoices(languageSel.value);
   }
 
-  // 2. 合成
-  let currentBlobUrl = null;
-  async function synth(download = false) {
-    const text = $("ttsText").value.trim();
-    if (!text) { log("文本为空", "error"); return; }
-    if (text.length > 2000) { log("文本超过 2000 字符", "error"); return; }
-
-    const voice = $("ttsVoice").value;
-    const btn = download ? $("ttsDownloadBtn") : $("ttsBtn");
-    const orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "合成中...";
-
-    const t0 = performance.now();
+  async function loadVoices(languageType) {
     try {
-      const r = await fetch("/api/tts", {
+      const resp = await fetch(`/api/tts/voices?language_type=${encodeURIComponent(languageType)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const voices = data.voices || [];
+      const current = voiceSel.value;
+      voiceSel.innerHTML = voices.map((v) =>
+        `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`
+      ).join("");
+      if (!voices.includes(current) && voices.length > 0) {
+        voiceSel.value = data.default || voices[0];
+      }
+    } catch (e) {
+      log(`Failed to load voices: ${e.message}`, "error");
+    }
+  }
+
+  async function generate() {
+    const text = textEl.value.trim();
+    if (!text) {
+      log("Please enter text to synthesize.", "warn");
+      textEl.focus();
+      return;
+    }
+
+    const voice = voiceSel.value;
+    const languageType = languageSel.value;
+
+    generateBtn.disabled = true;
+    generateBtn.textContent = "Synthesizing...";
+    clearSubtitle();
+    log(`Synthesizing: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}" → ${voice}`);
+
+    try {
+      const resp = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice }),
+        body: JSON.stringify({ text, voice, language_type: languageType }),
       });
-      if (!r.ok) {
-        const err = await r.text();
-        throw new Error(err);
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
       }
-      const blob = await r.blob();
-      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-      currentBlobUrl = URL.createObjectURL(blob);
 
-      $("ttsPlayerWrap").style.display = "block";
-      const player = $("ttsPlayer");
-      player.src = currentBlobUrl;
-      if (!download) player.play().catch(() => {});
-
-      // 元数据
-      const txtLen = r.headers.get("X-Text-Length") || text.length;
-      const audioSize = r.headers.get("X-Audio-Size") || blob.size;
-      $("ttsMetaText").innerHTML = `文本 <code>${txtLen}</code> 字符`;
-      $("ttsMetaSize").innerHTML = `音频 <code>${(audioSize / 1024).toFixed(1)}</code> KB`;
-      $("ttsMetaTime").innerHTML = `耗时 <code>${((performance.now() - t0) / 1000).toFixed(2)}</code> s`;
-
-      log(`合成成功: 音色=${voice}, ${txtLen} 字符 -> ${(audioSize / 1024).toFixed(1)} KB, 耗时 ${((performance.now() - t0) / 1000).toFixed(2)}s`, "success");
-
-      if (download) {
-        const a = document.createElement("a");
-        a.href = currentBlobUrl;
-        a.download = `tts_${Date.now()}.mp3`;
-        a.click();
-        log("已触发下载", "info");
+      const data = await resp.json();
+      const meta = data.meta || {};
+      const audioBase64 = data.audio;
+      
+      if (!audioBase64) {
+        throw new Error("No audio data in response");
       }
+
+      // Decode base64 audio
+      const audioBlob = base64ToBlob(audioBase64, "audio/mpeg");
+      const url = URL.createObjectURL(audioBlob);
+      audioEl.src = url;
+      playerWrap.hidden = false;
+
+      // Store word-level timestamps
+      wordsData = meta.words || [];
+      if (wordsData.length > 0) {
+        log(`Audio generated with ${wordsData.length} word timestamps`, "success");
+        renderWords(wordsData);
+      } else {
+        log(`Audio generated: ${(meta.size / 1024).toFixed(1)} KB · voice=${meta.voice}`, "success");
+        subtitleText.textContent = text;
+      }
+
+      metaVoice.textContent = meta.voice || voice;
+      metaSize.textContent = `${((meta.size || 0) / 1024).toFixed(1)} KB`;
+      metaCached.textContent = meta.cached ? "Yes" : "No";
+
     } catch (e) {
-      log("合成失败: " + e.message, "error");
+      log(`TTS failed: ${e.message}`, "error");
     } finally {
-      btn.disabled = false;
-      btn.textContent = orig;
+      generateBtn.disabled = false;
+      generateBtn.textContent = "🔊 Generate Speech";
     }
   }
 
-  // 3. Tab 切换
-  function initTabs() {
-    const tabs = document.querySelectorAll("#mainTabs .tab-btn");
-    tabs.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        tabs.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        const target = btn.dataset.tab;
-        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.add("hidden"));
-        const panel = $("tab-" + target);
-        if (panel) panel.classList.remove("hidden");
-      });
+  function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  }
+
+  function renderWords(words) {
+    subtitleText.innerHTML = "";
+    words.forEach((w, i) => {
+      const span = document.createElement("span");
+      span.className = "tts-word";
+      span.dataset.index = i;
+      span.dataset.begin = w.begin_time || 0;
+      span.dataset.end = w.end_time || 0;
+      span.textContent = w.text + " ";
+      subtitleText.appendChild(span);
     });
   }
 
-  // 4. 示例填充
-  function initExamples() {
-    document.querySelectorAll(".example-chip").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        $("ttsText").value = chip.dataset.text;
-        log("填入示例: " + chip.textContent);
-      });
+  function onAudioTimeUpdate() {
+    if (!wordsData || wordsData.length === 0) return;
+    
+    const currentTimeMs = audioEl.currentTime * 1000;
+    
+    // Find current word
+    wordsData.forEach((w, i) => {
+      const span = subtitleText.querySelector(`[data-index="${i}"]`);
+      if (!span) return;
+      
+      const begin = parseInt(span.dataset.begin);
+      const end = parseInt(span.dataset.end);
+      
+      if (currentTimeMs >= begin && currentTimeMs <= end) {
+        span.classList.add("active");
+        span.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        span.classList.remove("active");
+      }
     });
   }
 
-  // 5. 启动
-  function init() {
-    initTabs();
-    initExamples();
-    $("ttsBtn").addEventListener("click", () => synth(false));
-    $("ttsDownloadBtn").addEventListener("click", () => synth(true));
-    loadEngineInfo();
+  function clearSubtitle() {
+    wordsData = [];
+    if (subtitleText) {
+      subtitleText.innerHTML = "";
+    }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
+  function log(message, type = "info") {
+    const line = document.createElement("div");
+    line.className = `tts-log-line ${type}`;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
   }
+
+  return { init };
 })();
+
+window.TTSTab = TTSTab;

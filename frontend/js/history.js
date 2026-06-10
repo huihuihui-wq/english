@@ -1,4 +1,4 @@
-/** 历史记录面板 - 列出/打开/删除历史 */
+/** History panel - list / open / delete records */
 const History = (() => {
   let listEl, subEl, refreshBtn;
   let items = [];
@@ -11,9 +11,8 @@ const History = (() => {
 
     refreshBtn.addEventListener("click", load);
 
-    // 监听 tab 切换
     document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener("click", (e) => {
+      btn.addEventListener("click", () => {
         if (btn.dataset.tab === "history") {
           load();
         }
@@ -23,8 +22,8 @@ const History = (() => {
 
   async function load() {
     if (!listEl) return;
-    subEl.textContent = "正在加载…";
-    listEl.innerHTML = `<div class="history-empty">加载中…</div>`;
+    subEl.textContent = "Loading…";
+    listEl.innerHTML = `<div class="history-empty">Loading…</div>`;
     try {
       const resp = await fetch("/api/history");
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -32,12 +31,12 @@ const History = (() => {
       items = data.items || [];
       render();
     } catch (err) {
-      subEl.textContent = "加载失败";
+      subEl.textContent = "Load failed";
       listEl.innerHTML = `<div class="history-empty">❌ ${err.message}</div>`;
     }
   }
 
-  /** 保存/更新一条历史记录（转写完成后调用） */
+  /** Save/update a history record (called after transcription) */
   async function save({ type, title, source, size_bytes = 0, duration = 0, subtitles = [], raw_text = "", progress_seconds = 0 }) {
     try {
       const resp = await fetch("/api/history", {
@@ -48,25 +47,28 @@ const History = (() => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       currentId = data.id;
+      const histPanel = document.getElementById("tab-history");
+      if (histPanel && !histPanel.classList.contains("hidden")) {
+        load();
+      }
       return data.id;
     } catch (e) {
-      console.warn("[History.save] 失败:", e);
+      console.warn("[History.save] failed:", e);
       return null;
     }
   }
 
-  /** 即时上报进度（节流，详见 HistoryReportProgress） */
   function reportProgress(id, t) {
     if (window.HistoryReportProgress) window.HistoryReportProgress(id, t);
   }
 
   function render() {
     if (!items.length) {
-      subEl.textContent = "还没有历史记录。上传视频或加载在线视频后会自动出现在这里。";
-      listEl.innerHTML = `<div class="history-empty">📂 暂无历史记录</div>`;
+      subEl.textContent = "No history yet. Upload or load a video to get started.";
+      listEl.innerHTML = `<div class="history-empty">📂 No history records</div>`;
       return;
     }
-    subEl.textContent = `共 ${items.length} 条记录`;
+    subEl.textContent = `${items.length} records`;
 
     listEl.innerHTML = "";
     items.forEach(item => {
@@ -75,10 +77,10 @@ const History = (() => {
       card.dataset.id = item.id;
 
       const typeLabel = {
-        local: "📁 本地上传",
+        local: "📁 Local Upload",
         youtube: "▶️ YouTube",
-        online_url: "🔗 在线视频",
-      }[item.type] || "📄 其他";
+        online_url: "🔗 Online Video",
+      }[item.type] || "📄 Other";
 
       const progressPct = item.duration
         ? Math.min(100, Math.round((item.progress_seconds || 0) / item.duration * 100))
@@ -93,10 +95,10 @@ const History = (() => {
             <span>·</span>
             <span>${formatDuration(item.duration)}</span>
             <span>·</span>
-            <span>${item.subtitle_count || 0} 句</span>
+            <span>${item.subtitle_count || 0} sentences</span>
             <span>·</span>
             <span title="${escapeHtml(item.last_opened || "")}">${formatRelative(item.last_opened || item.created_at)}</span>
-            ${item.open_count > 1 ? `<span>·</span><span>打开 ${item.open_count} 次</span>` : ""}
+            ${item.open_count > 1 ? `<span>·</span><span>opened ${item.open_count} times</span>` : ""}
           </div>
           <div class="hi-progress">
             <div class="hi-progress-bar"><div class="hi-progress-fill" style="width:${progressPct}%"></div></div>
@@ -104,8 +106,8 @@ const History = (() => {
           </div>
         </div>
         <div class="hi-actions">
-          <button class="btn primary hi-open">${item.progress_seconds > 1 ? "▶ 继续" : "▶ 打开"}</button>
-          <button class="btn ghost hi-delete" title="删除">✕</button>
+          <button class="btn primary hi-open">${item.progress_seconds > 1 ? "▶ Resume" : "▶ Open"}</button>
+          <button class="btn ghost hi-delete" title="Delete">✕</button>
         </div>
       `;
 
@@ -124,7 +126,6 @@ const History = (() => {
 
   async function openItem(item) {
     currentId = item.id;
-    // 切换到影子跟读 tab
     document.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.toggle("active", b.dataset.tab === "shadow");
     });
@@ -137,9 +138,14 @@ const History = (() => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const rec = await resp.json();
 
-      // 分发加载
+      if (window.App && typeof window.App.activateTab === "function") {
+        window.App.activateTab("shadow");
+      }
+
+      const sourceLang = (rec.subtitles && rec.subtitles[0] && rec.subtitles[0].source_lang) || rec.source_lang || "en";
+      if (window.AppState) window.AppState.currentSourceLang = sourceLang;
+
       if (rec.type === "youtube") {
-        // 在线 YouTube 链接：直接用 Player.loadVideo 加载
         if (window.Player && window.Player.loadVideo) {
           const url = `https://www.youtube.com/watch?v=${rec.source}`;
           Player.loadVideo(url, {
@@ -147,9 +153,7 @@ const History = (() => {
             duration: rec.duration || 0,
             title: rec.title,
           });
-          // 恢复进度
           if (rec.progress_seconds > 1) {
-            // YouTube iframe 不能用 currentTime 直接跳，但先记录
             window.AppState.historyYouTubeRestore = rec.progress_seconds;
           }
         }
@@ -167,13 +171,10 @@ const History = (() => {
           }, 500);
         }
       } else {
-        // 本地文件：原始文件不会保留在服务器。需要用户重新选择文件。
-        // 但可以先把字幕和进度信息预先填入页面。
         alert(
-          `本地文件 "${rec.title}" 已被清理（仅保留字幕与进度）。\n\n` +
-          `请重新选择该文件，系统会自动应用上次的字幕与进度。`
+          `Local file "${rec.title}" is no longer stored on the server (only subtitles and progress are kept).\n\n` +
+          `Please re-select the original file, and the previous subtitles/progress will be restored automatically.`
         );
-        // 触发重选
         if (window.App && window.App.reselectForHistory) {
           App.reselectForHistory(rec);
         } else {
@@ -181,18 +182,18 @@ const History = (() => {
         }
       }
     } catch (err) {
-      alert("打开历史记录失败: " + err.message);
+      alert("Failed to open history record: " + err.message);
     }
   }
 
   async function deleteItem(item) {
-    if (!confirm(`确认删除历史记录 "${item.title}" ？`)) return;
+    if (!confirm(`Delete history record "${item.title}"?`)) return;
     try {
       const resp = await fetch(`/api/history/${item.id}`, { method: "DELETE" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await load();
     } catch (err) {
-      alert("删除失败: " + err.message);
+      alert("Delete failed: " + err.message);
     }
   }
 
@@ -211,19 +212,19 @@ const History = (() => {
     const t = new Date(iso).getTime();
     if (isNaN(t)) return iso;
     const diff = (Date.now() - t) / 1000;
-    if (diff < 60) return "刚刚";
-    if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
-    return new Date(iso).toLocaleDateString("zh-CN");
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+    return new Date(iso).toLocaleDateString("en-US");
   }
 
   function escapeHtml(s) {
     return String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/\u0026/g, "\u0026amp;")
+      .replace(/\u003c/g, "\u0026lt;")
+      .replace(/\u003e/g, "\u0026gt;")
+      .replace(/"/g, "\u0026quot;");
   }
 
   return {
@@ -235,7 +236,7 @@ const History = (() => {
 
 window.History = History;
 
-/* ========== 进度上报（节流） ========== */
+/* Progress reporting (throttled) */
 (function () {
   let lastReport = 0;
   let pendingId = null;
@@ -253,10 +254,9 @@ window.History = History;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ progress_seconds: t }),
       });
-    } catch (e) { /* 静默 */ }
+    } catch (e) { /* silent */ }
   }
 
-  // 暴露给外部：节流上报
   window.HistoryReportProgress = function (id, t) {
     if (!id) return;
     pendingId = id;
@@ -267,7 +267,6 @@ window.History = History;
     timer = setTimeout(() => { timer = null; flush(); }, wait);
   };
 
-  // 关闭/卸载前 flush
   window.addEventListener("beforeunload", () => {
     if (pendingId) {
       const id = pendingId, t = pendingT;
@@ -276,8 +275,7 @@ window.History = History;
           `/api/history/${id}/progress`,
           new Blob([JSON.stringify({ progress_seconds: t })], { type: "application/json" })
         );
-      } catch (e) { /* 静默 */ }
+      } catch (e) { /* silent */ }
     }
   });
 })();
-

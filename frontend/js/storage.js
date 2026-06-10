@@ -1,12 +1,13 @@
-// localStorage 工具
+// localStorage utilities
 const STORAGE_KEY = "shadow-reader.settings.v1";
 
 const DEFAULT_SETTINGS = {
   speed: 1,
   loopCount: 3,
   pauseSec: 2,
+  delaySec: 0,
   autoReplay: false,
-  showZh: false,
+  targetLang: "",
 };
 
 const Storage = {

@@ -1,37 +1,48 @@
-"""字幕切句 - 基于词级时间戳按标点组合成句子"""
+"""Sentence splitting from word-level ASR timestamps."""
 import re
 import logging
 from typing import List
 
 logger = logging.getLogger(__name__)
 
-SENTENCE_END_PUNCT = ".!?,;:"
 ABBREVIATIONS = {"Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.", "St.", "vs.", "etc.", "e.g.", "i.e."}
 
+# Language groups that commonly use full-width sentence terminators
+_CJK_LANGS = {"zh", "ja"}
 
-def split_sentences_with_timestamps(words: list, text: str) -> List[dict]:
-    """
-    将带时间戳的 words[] 数组按标点切分为句子。
-    句子的 start = 首个词的 begin_time
-    句子的 end = 末个词的 end_time
 
-    返回 [{start, end, en, dur}, ...]，时间单位毫秒。
+def _sentence_end_pattern(language: str) -> str:
+    if language in _CJK_LANGS:
+        # Include both full-width CJK terminators and western ones as fallback
+        return r"[。！？.!?]+|\.{3,}|…+"
+    return r"[.!?]+|\.{3,}"
+
+
+def _fallback_split_pattern(language: str) -> str:
+    if language in _CJK_LANGS:
+        return r"(?<=[。！？.!?])\s+"
+    return r"(?<=[.!?])\s+"
+
+
+def split_sentences_with_timestamps(words: list, text: str, language: str = "en") -> List[dict]:
+    """Split timestamped words into sentences based on punctuation.
+
+    Returns [{start, end, en, dur}, ...] in milliseconds.
     """
     if not words:
-        return _fallback_proportional(text)
+        return _fallback_proportional(text, language=language)
 
     protected = text or ""
     for abbr in ABBREVIATIONS:
         protected = protected.replace(abbr, abbr.replace(".", "<DOT>"))
 
+    end_pattern = _sentence_end_pattern(language)
     end_positions = []
-    for m in re.finditer(r"[.!?]+|\.{3,}", protected):
+    for m in re.finditer(end_pattern, protected):
         end_positions.append(m.end())
 
     if not end_positions:
         full_text = "".join(w["text"] for w in words)
-        total_chars = sum(len(w["text"]) for w in words) or 1
-        total_dur = max((w["end_time"] for w in words), default=0)
         return [{
             "start": words[0]["begin_time"],
             "end": words[-1]["end_time"],
@@ -50,7 +61,6 @@ def split_sentences_with_timestamps(words: list, text: str) -> List[dict]:
 
     sentences = []
     last_word_idx = 0
-    text_cursor = 0
 
     for end_pos in end_positions:
         if end_pos > len(char_to_word_idx):
@@ -81,17 +91,18 @@ def split_sentences_with_timestamps(words: list, text: str) -> List[dict]:
         s["dur"] = s["end"] - s["start"]
 
     if not sentences:
-        return _fallback_proportional(text)
+        return _fallback_proportional(text, language=language)
 
-    logger.info(f"切分: {len(words)} words → {len(sentences)} sentences")
+    logger.info("Split: %d words -> %d sentences (%s)", len(words), len(sentences), language)
     return sentences
 
 
-def _fallback_proportional(text: str, total_ms: int = 0) -> List[dict]:
-    """无词级时间戳时回退到比例分配"""
+def _fallback_proportional(text: str, total_ms: int = 0, language: str = "en") -> List[dict]:
+    """Fallback proportional allocation when no word timestamps are available."""
     if not text or not text.strip():
         return []
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    split_pat = _fallback_split_pattern(language)
+    parts = re.split(split_pat, text.strip())
     sentences = [p.strip().replace("<DOT>", ".") for p in parts if p.strip()]
     if not sentences:
         return []
@@ -109,3 +120,105 @@ def _fallback_proportional(text: str, total_ms: int = 0) -> List[dict]:
         })
         cursor += dur
     return result
+
+
+def _split_text_to_sentences(text: str, language: str = "en") -> List[str]:
+    """Split text into sentences using language-aware punctuation."""
+    if not text or not text.strip():
+        return []
+    split_pat = _fallback_split_pattern(language)
+    parts = re.split(split_pat, text.strip())
+    return [p.strip().replace("<DOT>", ".") for p in parts if p.strip()]
+
+
+def build_subtitles_from_speech_segments(
+    text: str,
+    speech_segments: list[dict],
+    non_speech_segments: list[dict],
+    language: str = "en",
+    placeholder_label: str = "...",
+) -> List[dict]:
+    """Build subtitle items by mapping sentences to detected speech segments.
+
+    Non-speech segments longer than the threshold become placeholder subtitles.
+    Returns [{start, end, en, dur, is_placeholder?}, ...] in milliseconds.
+    """
+    sentences = _split_text_to_sentences(text, language)
+    if not sentences and not speech_segments and not non_speech_segments:
+        return []
+
+    items = []
+    placeholder_min_ms = 1500
+
+    total_speech_duration = max(1, sum(seg["end_ms"] - seg["start_ms"] for seg in speech_segments))
+    total_text_chars = max(1, sum(len(s) for s in sentences))
+
+    sent_idx = 0
+    for seg in speech_segments:
+        seg_dur = seg["end_ms"] - seg["start_ms"]
+        if seg_dur <= 0:
+            continue
+
+        # Allocate sentences roughly proportional to this segment's share of speech time.
+        target_chars = total_text_chars * (seg_dur / total_speech_duration)
+        seg_sentences = []
+        chars_allocated = 0
+        while sent_idx < len(sentences):
+            s = sentences[sent_idx]
+            if not seg_sentences or chars_allocated + len(s) <= target_chars + len(s) * 0.6:
+                seg_sentences.append(s)
+                chars_allocated += len(s)
+                sent_idx += 1
+            else:
+                break
+
+        if not seg_sentences:
+            continue
+
+        seg_text_chars = max(1, sum(len(s) for s in seg_sentences))
+        cursor = seg["start_ms"]
+        for s in seg_sentences:
+            s_dur = seg_dur * (len(s) / seg_text_chars)
+            items.append({
+                "start": int(cursor),
+                "end": int(cursor + s_dur),
+                "en": s,
+                "dur": int(s_dur),
+            })
+            cursor += s_dur
+
+    # Append any leftover sentences to the last speech segment or at the end.
+    while sent_idx < len(sentences):
+        if items:
+            last_end = items[-1]["end"]
+            items.append({
+                "start": last_end,
+                "end": last_end + 2000,
+                "en": sentences[sent_idx],
+                "dur": 2000,
+            })
+        else:
+            items.append({
+                "start": 0,
+                "end": 2000,
+                "en": sentences[sent_idx],
+                "dur": 2000,
+            })
+        sent_idx += 1
+
+    # Placeholder entries for music / long silence.
+    for ns in non_speech_segments:
+        ns_dur = ns["end_ms"] - ns["start_ms"]
+        if ns_dur >= placeholder_min_ms:
+            items.append({
+                "start": ns["start_ms"],
+                "end": ns["end_ms"],
+                "en": placeholder_label,
+                "dur": ns_dur,
+                "is_placeholder": True,
+            })
+
+    items.sort(key=lambda x: x["start"])
+    logger.info("VAD-based split: %d speech segs, %d non-speech segs -> %d items (%s)",
+                len(speech_segments), len(non_speech_segments), len(items), language)
+    return items

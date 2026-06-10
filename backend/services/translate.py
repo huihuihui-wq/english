@@ -1,51 +1,98 @@
-"""Qwen-Plus 翻译服务 - 通过 DashScope (阿里百炼) Chat Completions"""
-import os
+"""Translation service using DashScope qwen-plus via OpenAI-compatible chat completions."""
 import json
-import re
 import logging
+import re
+
 import httpx
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a professional English-to-Chinese (Simplified) translator for a language learning shadowing app.
-The user provides a JSON array of English sentences. You must return a JSON array with the SAME length and order.
-Each item: {"en": "<original english>", "zh": "<natural simplified Chinese translation>"}.
+SUPPORTED_TARGET_LANGS = [
+    {"id": "Chinese",             "name": "Chinese (Simplified)",  "field": "zh",    "native": "简体中文"},
+    {"id": "Chinese-Traditional", "name": "Chinese (Traditional)", "field": "zh-TW", "native": "繁體中文"},
+    {"id": "Japanese",            "name": "Japanese",              "field": "ja",    "native": "日本語"},
+    {"id": "Korean",              "name": "Korean",                "field": "ko",    "native": "한국어"},
+    {"id": "French",              "name": "French",                "field": "fr",    "native": "Français"},
+    {"id": "German",              "name": "German",                "field": "de",    "native": "Deutsch"},
+    {"id": "Spanish",             "name": "Spanish",               "field": "es",    "native": "Español"},
+    {"id": "Portuguese",          "name": "Portuguese",            "field": "pt",    "native": "Português"},
+    {"id": "Russian",             "name": "Russian",               "field": "ru",    "native": "Русский"},
+    {"id": "Italian",             "name": "Italian",               "field": "it",    "native": "Italiano"},
+]
 
-Rules:
-- Keep sentence order and count EXACTLY matching the input.
-- Translations must be natural, fluent Simplified Chinese.
-- Keep proper nouns, brand names, and English terms when appropriate.
-- Output ONLY valid JSON. No explanations, no markdown fences."""
+_TARGET_LANG_MAP = {x["id"]: x for x in SUPPORTED_TARGET_LANGS}
+
+_TARGET_LANG_NAMES = {
+    "Chinese": "Chinese (Simplified)",
+    "Chinese-Traditional": "Traditional Chinese (Taiwan/Hong Kong)",
+    "Japanese": "Japanese",
+    "Korean": "Korean",
+    "French": "French",
+    "German": "German",
+    "Spanish": "Spanish",
+    "Portuguese": "Portuguese",
+    "Russian": "Russian",
+    "Italian": "Italian",
+}
+
+
+def _build_system_prompt(target_lang: str, source_lang: str = "English") -> str:
+    target_name = _TARGET_LANG_NAMES.get(target_lang, target_lang)
+    source_name = {
+        "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",
+        "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
+        "ru": "Russian", "it": "Italian",
+    }.get(source_lang.lower(), source_lang)
+    target_field = _TARGET_LANG_MAP[target_lang]["field"]
+    return (
+        f"You are a professional {source_name}-to-{target_name} translator for a language learning shadowing app.\n"
+        f"The user provides a JSON array of {source_name} sentences. You must return a JSON array with the SAME length and order.\n"
+        f'Each item: {{"en": "<original sentence>", "{target_field}": "<natural {target_name} translation>"}}.\n\n'
+        "Rules:\n"
+        "- Keep sentence order and count EXACTLY matching the input.\n"
+        f"- Translations must be natural, fluent {target_name}.\n"
+        "- Keep proper nouns, brand names, and untranslatable terms when appropriate.\n"
+        "- Output ONLY valid JSON. No explanations, no markdown fences."
+    )
 
 
 def _get_config():
+    from services.config import get_setting
     return {
-        "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": os.getenv("TRANSLATE_MODEL", "qwen-plus"),
+        "api_key": get_setting("DASHSCOPE_API_KEY", ""),
+        "base_url": get_setting(
+            "DASHSCOPE_COMPATIBLE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        "model": get_setting("TRANSLATE_MODEL", "qwen-plus"),
     }
 
 
-async def translate_sentences(sentences: list[str]) -> list[dict]:
-    """
-    将英文句子数组翻译为 [{en, zh}, ...]
-    """
+async def translate_sentences(sentences: list[str], target_lang: str = "Chinese", source_lang: str = "English") -> list[dict]:
+    """Translate sentences from source_lang to target_lang, returning [{en, <field>}, ...]."""
     if not sentences:
         return []
 
+    target = _TARGET_LANG_MAP.get(target_lang)
+    if not target:
+        raise ValueError(f"Unsupported target language: {target_lang}. Available: {list(_TARGET_LANG_MAP.keys())}")
+
     cfg = _get_config()
     if not cfg["api_key"]:
-        raise RuntimeError("DASHSCOPE_API_KEY 未配置")
+        raise RuntimeError("DASHSCOPE_API_KEY is not configured")
 
     endpoint = f"{cfg['base_url']}/chat/completions"
 
     user_payload = json.dumps(sentences, ensure_ascii=False)
     user_prompt = f"Translate this JSON array:\n{user_payload}\nReturn JSON array only."
 
+    system_prompt = _build_system_prompt(target_lang, source_lang=source_lang)
+    expected_field = target["field"]
+
     body = {
         "model": cfg["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.2,
@@ -57,29 +104,32 @@ async def translate_sentences(sentences: list[str]) -> list[dict]:
         "Content-Type": "application/json",
     }
 
-    logger.info(f"Translate request: {len(sentences)} sentences, model={cfg['model']}")
+    logger.info(
+        "Translate request: %d sentences, model=%s, %s -> %s (field=%s)",
+        len(sentences), cfg["model"], source_lang, target_lang, expected_field,
+    )
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(endpoint, headers=headers, json=body)
 
     if resp.status_code != 200:
-        logger.error(f"Translate failed: {resp.status_code} {resp.text}")
-        raise RuntimeError(f"翻译失败: {resp.status_code} {resp.text[:300]}")
+        logger.error("Translate failed: %s %s", resp.status_code, resp.text)
+        raise RuntimeError(f"Translation failed: {resp.status_code} {resp.text[:300]}")
 
     result = resp.json()
     content = result["choices"][0]["message"]["content"]
-    logger.info(f"Translate ok, raw_len={len(content)}")
+    logger.info("Translate ok, raw_len=%d", len(content))
 
-    return _parse_translation_response(content, sentences)
+    return _parse_translation_response(content, sentences, expected_field, target_lang)
 
 
-def _parse_translation_response(content: str, original_sentences: list[str]) -> list[dict]:
-    """
-    解析模型输出，容错处理：
-    - 去除 markdown 围栏
-    - 若模型返回 dict 包裹数组，提取数组
-    - 若数量不匹配，按原文回填中文
-    """
+def _parse_translation_response(
+    content: str,
+    original_sentences: list[str],
+    expected_field: str = "zh",
+    target_lang: str = "Chinese",
+) -> list[dict]:
+    """Parse model output and gracefully handle markdown fences, dict wrappers, and missing fields."""
     text = content.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -91,11 +141,11 @@ def _parse_translation_response(content: str, original_sentences: list[str]) -> 
         match = re.search(r"\[.*\]", text, re.DOTALL)
         if not match:
             logger.warning("Translate response is not valid JSON, falling back")
-            return [{"en": s, "zh": ""} for s in original_sentences]
+            return [{"en": s, expected_field: ""} for s in original_sentences]
         try:
             parsed = json.loads(match.group(0))
         except json.JSONDecodeError:
-            return [{"en": s, "zh": ""} for s in original_sentences]
+            return [{"en": s, expected_field: ""} for s in original_sentences]
 
     arr = None
     if isinstance(parsed, list):
@@ -112,17 +162,36 @@ def _parse_translation_response(content: str, original_sentences: list[str]) -> 
                     break
 
     if not arr:
-        return [{"en": s, "zh": ""} for s in original_sentences]
+        return [{"en": s, expected_field: ""} for s in original_sentences]
+
+    candidate_keys = [expected_field, "translation", "text", "target", "t"]
+    for v in _TARGET_LANG_MAP.values():
+        candidate_keys.append(v["field"])
 
     out = []
     for i, en in enumerate(original_sentences):
-        zh = ""
+        translated = ""
         if i < len(arr):
             item = arr[i]
             if isinstance(item, dict):
-                zh = item.get("zh") or item.get("translation") or item.get("cn") or ""
+                for k in candidate_keys:
+                    val = item.get(k)
+                    if isinstance(val, str) and val.strip():
+                        translated = val
+                        break
+                    if isinstance(val, (list, dict)) and val:
+                        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], str):
+                            translated = val[0]
+                            break
+                        elif isinstance(val, dict):
+                            for sub_v in val.values():
+                                if isinstance(sub_v, str) and sub_v.strip():
+                                    translated = sub_v
+                                    break
+                            if translated:
+                                break
             elif isinstance(item, str):
-                zh = item
-        out.append({"en": en, "zh": zh})
+                translated = item
+        out.append({"en": en, expected_field: translated})
 
     return out

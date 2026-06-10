@@ -1,4 +1,4 @@
-// 文件上传 + 后端转写
+// File upload + backend transcription
 const Uploader = (() => {
   let dropzone, fileInput, pickBtn, progressWrap, progressLabel, progressFill, statusEl;
 
@@ -54,34 +54,41 @@ const Uploader = (() => {
   }
 
   function handleFile(file) {
-    const maxMB = 50;
+    const maxMB = 200;
     if (file.size > maxMB * 1024 * 1024) {
-      alert(`文件超过 ${maxMB}MB 限制`);
+      alert(`File exceeds ${maxMB}MB limit`);
       return;
     }
-    setStatus("上传中…", "working");
-    setProgress(10, `上传 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
+    setStatus("Uploading…", "working");
+    setProgress(10, `Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
 
     const formData = new FormData();
     formData.append("file", file);
+    const langSel = document.getElementById("uploadLanguage");
+    if (langSel) {
+      formData.append("language", langSel.value || "en");
+    } else {
+      formData.append("language", "en");
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/transcribe");
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         const pct = (e.loaded / e.total) * 50;
-        setProgress(pct, `上传中 ${(pct * 2).toFixed(0)}%`);
+        setProgress(pct, `Uploading ${(pct * 2).toFixed(0)}%`);
       }
     };
     xhr.onload = () => {
       if (xhr.status === 200) {
         try {
           const data = JSON.parse(xhr.responseText);
-          setProgress(100, "完成");
-          setStatus("就绪", "ready");
+          setProgress(100, "Done");
+          setStatus("Ready", "ready");
           hideProgress();
-          // 保存到历史记录
+          // Save to history
           if (window.History && window.History.save) {
+            const firstSub = (data.subtitles && data.subtitles[0]) || {};
             window.History.save({
               type: "local",
               title: file.name,
@@ -90,11 +97,12 @@ const Uploader = (() => {
               duration: data.duration || 0,
               subtitles: data.subtitles || [],
               raw_text: data.raw_text || "",
+              source_lang: firstSub.source_lang || "en",
             });
           }
           window.dispatchEvent(new CustomEvent("transcribe:done", { detail: { file, data } }));
         } catch (e) {
-          fail("解析响应失败");
+          fail("Failed to parse response");
         }
       } else {
         let msg = `HTTP ${xhr.status}`;
@@ -102,26 +110,29 @@ const Uploader = (() => {
           const err = JSON.parse(xhr.responseText);
           if (err.detail) msg = err.detail;
         } catch {}
+        if (/too long|duration|exceeds/i.test(msg)) {
+          msg = "Audio is too long. Long clips are auto-sliced; if this still fails, use a shorter clip or increase MAX_ASR_AUDIO_SECONDS in backend/.env.";
+        }
         fail(msg);
       }
     };
-    xhr.onerror = () => fail("网络错误");
-    xhr.onabort = () => fail("已取消");
+    xhr.onerror = () => fail("Network error");
+    xhr.onabort = () => fail("Cancelled");
 
     xhr.send(formData);
 
     setTimeout(() => {
       if (xhr.readyState !== 4) {
-        setStatus("识别中…", "working");
-        setProgress(60, "AI 语音识别中（可能需要 30-60s）");
+        setStatus("Transcribing…", "working");
+        setProgress(60, "AI speech recognition in progress (may take 30-120s)");
       }
     }, 500);
   }
 
   function fail(msg) {
-    setStatus(`失败: ${msg}`, "error");
+    setStatus(`Failed: ${msg}`, "error");
     hideProgress();
-    alert("转写失败: " + msg);
+    alert("Transcription failed: " + msg);
   }
 
   return { init };

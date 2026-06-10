@@ -3,6 +3,8 @@ node_modules/
 __pycache__/
 *.pyc
 .env
+backend/.env
+backend/.venv/
 
 # Large media files
 *.mp4
@@ -11,14 +13,15 @@ __pycache__/
 *.avi
 *.mkv
 
-# Generated materials (these should be generated locally)
-backend/data/materials/static/*/
-backend/data/materials/daily/*/
-!backend/data/materials/static/manifest.json
-!backend/data/materials/daily/**/candidates.json
-
-# User-specific history (subtitle cache + watch progress)
+# User data and runtime state
+backend/data/settings.json
 backend/data/history/
+backend/.tts_cache/
+
+# Logs
+*.log
+backend/server*.log
+backend/server.err
 
 # IDE
 .vscode/
@@ -30,5 +33,6 @@ backend/data/history/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Test outputs / caches
+.pytest_cache/
+.mypy_cache/

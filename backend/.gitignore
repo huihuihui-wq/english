@@ -7,3 +7,7 @@ venv/
 uploads/
 *.log
 .DS_Store
+# Sensitive user settings saved at runtime
+data/settings.json
+# YouTube cookies (user-provided credentials)
+yt_cookies.txt

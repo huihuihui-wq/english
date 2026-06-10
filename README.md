@@ -1,29 +1,30 @@
-# Shadow Reader · 影子跟读
+# Shadow Reader
 
-一个**纯前端 + 后端 API** 的影子跟读工具。上传音频/视频，AI 自动转写并按句切分，配套中文翻译与时间轴，可控倍速、单句重读、自动跟读循环。
+AI-powered shadowing practice. Upload audio/video or paste a YouTube/direct video link, and Shadow Reader transcribes, splits by sentence, translates, and gives you a player built for sentence-level looping and shadowing.
 
-## ✨ 功能
+## Features
 
-- 📁 **拖入音视频**（mp3 / wav / m4a / mp4，≤50MB / ≤1h）
-- 🤖 **AI 自动转写**（DashScope `qwen3-asr-flash`）
-- 🌐 **逐句翻译**（DashScope `qwen-plus`）
-- ⏱ **按句时间轴**（按标点切句 + 字符数等比分配）
-- ⏯ **播放器**：倍速 0.5x ~ 2x / 单句跳转 / 进度条
-- 🔁 **跟读模式**：每句重读 N 次（可调） + 句间停顿（可调）
-- ⌨️ **快捷键**：Space / ← / → / R / 1-6 / 0
-- 💾 **设置持久化**：localStorage
+- **Upload** audio/video (mp3 / wav / m4a / mp4, up to 200MB)
+- **Paste a link** — YouTube or direct MP4/WebM
+- **AI transcription** with DashScope `qwen3-asr-flash`
+- **Sentence-level translations** with DashScope `qwen-plus` (Chinese, Japanese, Spanish, and more)
+- **TTS test tab** with DashScope `sambert` voices — synthesize English/Chinese text and play/download audio
+- **Adjustable speed** (0.5x–2x), sentence jumping, looping, pause gap
+- **History** — saves subtitles and progress per video; re-uploading merges cached translations automatically
+- **Local quota estimate** — helps track DashScope token usage
+- **Keyboard shortcuts** — Space, ←/→, R, 1–6, 0
 
-## 🛠 技术栈
+## Tech stack
 
-| 层 | 选型 |
+| Layer | Choice |
 |---|---|
-| 前端 | 纯 HTML + 原生 JS（无构建） |
-| 后端 | Python 3.10+ / FastAPI / Uvicorn |
+| Frontend | Plain HTML + vanilla JS (no build step) |
+| Backend | Python 3.10+ / FastAPI / Uvicorn |
 | ASR | DashScope `qwen3-asr-flash` |
-| 翻译 | DashScope `qwen-plus` |
-| 时间戳 | 比例估算（按标点切句 + 字符数等比分配） |
+| Translation | DashScope `qwen-plus` |
+| TTS | DashScope `sambert` |
 
-## 🚀 快速开始
+## Quick start
 
 ### Windows
 
@@ -31,7 +32,7 @@
 run.bat
 ```
 
-浏览器打开 http://localhost:8000
+Then open http://localhost:8000.
 
 ### macOS / Linux
 
@@ -40,82 +41,65 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # 编辑填入 DASHSCOPE_API_KEY
+cp .env.example .env   # edit and add DASHSCOPE_API_KEY
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## ⚙️ 配置
+## Configuration
 
-`backend/.env`：
+Create `backend/.env` from `.env.example`:
 
 ```env
 DASHSCOPE_API_KEY=sk-xxxxxxxxxxxx
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
 ASR_MODEL=qwen3-asr-flash
 TRANSLATE_MODEL=qwen-plus
-MAX_UPLOAD_MB=50
+MAX_UPLOAD_MB=200
 ```
 
-> 申请 Key：https://bailian.console.aliyun.com/?tab=model#/api-key
+Get a free key at https://bailian.console.aliyun.com/?tab=model#/api-key.
 
-## 📁 项目结构
+## Project structure
 
 ```
 shadow-reader/
 ├── backend/
-│   ├── main.py              # FastAPI 入口
+│   ├── main.py                 # FastAPI entry
 │   ├── services/
-│   │   ├── asr.py           # DashScope ASR
-│   │   ├── translate.py     # qwen-plus 翻译
-│   │   └── subtitle.py      # 切句 + 时间戳
-│   ├── .env                 # API Key（勿提交）
+│   │   ├── asr.py              # DashScope ASR
+│   │   ├── translate.py        # qwen-plus translation
+│   │   ├── subtitle.py         # sentence splitting + timestamps
+│   │   ├── youtube_subtitles.py# YouTube subtitle fetching
+│   │   └── config.py           # settings persistence
 │   ├── .env.example
 │   └── requirements.txt
 ├── frontend/
 │   ├── index.html
 │   ├── css/style.css
-│   └── js/
-│       ├── app.js           # 主装配
-│       ├── uploader.js      # 上传
-│       ├── player.js        # 播放器
-│       ├── shadow.js        # 跟读模式
-│       └── storage.js       # localStorage
+│   └── js/                     # vanilla JS modules
 ├── run.bat
 └── README.md
 ```
 
-## 📡 API
+## API
 
-### `POST /api/transcribe`
+- `POST /api/transcribe` — upload audio/video and get subtitles + translation
+- `POST /api/generate-subtitles` — generate subtitles from a YouTube or direct video URL
+- `POST /api/translate-subtitles` — translate a list of sentences
+- `POST /api/tts` — synthesize text to speech
+- `GET /api/tts/voices` — list available Sambert voices
+- `GET /api/translate/info` — supported target languages
+- `GET|POST /api/quota` — read/update local quota estimate
+- `GET|POST|PATCH|DELETE /api/history/*` — history CRUD and progress
+- `GET|POST /api/config` — read/update API key and settings
 
-请求：multipart/form-data，字段 `file`（音视频文件），可选 `duration`（秒，前端可从 metadata 传入更准）。
+## License
 
-响应：
+MIT
 
-```json
-{
-  "duration": 124.5,
-  "subtitles": [
-    { "start": 0, "end": 4.2, "en": "Hi, I'd like to check in please.", "zh": "我想办理入住。" },
-    { "start": 4.2, "end": 7.8, "en": "Do you have a reservation?", "zh": "您有预订吗？" }
-  ],
-  "raw_text": "..."
-}
-```
+## Notes
 
-### `GET /api/health`
-
-健康检查。
-
-## ⚠️ 已知限制
-
-- **时间戳为估算值**（按字符数等比），与真实断句可能偏差 1-3 秒。对跟读场景已足够使用。
-- **单文件 ≤ 50MB / ≤ 1 小时**（DashScope 限制）。
-- **不支持视频字幕轨道抽取**（仅取音频流播放）。
-
-## 🗺 路线图
-
-- [ ] 接入本地强制对齐（whisperX / aeneas）替换比例估算
-- [ ] PWA 离线壳
-- [ ] 用户上传 SRT 字幕优先
-- [ ] 学习记录与统计
+- **Audio duration limit**: `qwen3-asr-flash` has a model-level audio length limit. The default backend guard is **120 seconds (2 minutes)**. Longer uploads are automatically sliced into overlapping segments, transcribed in parallel, and merged with offset timestamps. If slicing still fails, trim the clip or increase `MAX_ASR_AUDIO_SECONDS` in `backend/.env` if your DashScope account supports longer audio.
+- **Timing accuracy for long audio**: When ASR does not return word-level timestamps, the backend uses ffmpeg `silencedetect` to find real speech/non-speech regions and maps subtitles to actual voice segments. Non-speech segments (intro music, long pauses) are shown as `...` placeholder subtitles so the timeline stays aligned with the audio.
+- Timestamps are estimated from ASR word timings and punctuation. They are good enough for shadowing but may drift 1–3 seconds from exact speech boundaries.
+- Free DashScope quotas vary by account and promotion. The in-app quota widget is a local estimate; verify your actual balance in the DashScope console.

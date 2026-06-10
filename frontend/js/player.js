@@ -1,4 +1,4 @@
-// 播放器（音频/视频通用） + 字幕列表同步
+// Player (audio/video) + subtitle list sync
 const Player = (() => {
   let video, playBtn, prevBtn, nextBtn, replayBtn, seek, timeDisplay;
   let fileNameEl, splitWrap, splitView, playerCard, subtitleCard, subtitleList, subStats;
@@ -34,7 +34,6 @@ const Player = (() => {
     video.addEventListener("play", () => (playBtn.textContent = "⏸"));
     video.addEventListener("pause", () => (playBtn.textContent = "▶"));
 
-    // 监听在线视频字幕加载事件
     window.addEventListener("link:subtitles-loaded", (e) => {
       if (e.detail && e.detail.subtitles) {
         loadSubtitles(e.detail.subtitles);
@@ -55,7 +54,6 @@ const Player = (() => {
     objectUrl = URL.createObjectURL(file);
     video.src = objectUrl;
 
-    // 检测是否为视频文件
     isVideoFile = file.type.startsWith("video/");
     video.classList.toggle("audio-only", !isVideoFile);
 
@@ -63,10 +61,8 @@ const Player = (() => {
     splitWrap.hidden = false;
     document.body.classList.add("playing");
 
-    subtitles = data.subtitles || [];
-    currentIndex = -1;
-    renderSubtitles();
-    subStats.textContent = `共 ${subtitles.length} 句 · 时长 ${formatTime(data.duration || 0)}`;
+    loadSubtitles(data.subtitles || []);
+    subStats.textContent = `${subtitles.length} sentences · ${formatTime(data.duration || 0)}`;
   }
 
   function loadVideo(url, data) {
@@ -77,18 +73,15 @@ const Player = (() => {
     }
     video.src = url;
 
-    // 从 URL 判断是否为视频
     isVideoFile = url.match(/\.(mp4|webm|ogg|mov)(\?.*)?$/i) !== null;
     video.classList.toggle("audio-only", !isVideoFile);
 
-    fileNameEl.textContent = data.title || "在线视频";
+    fileNameEl.textContent = data.title || "Online Video";
     splitWrap.hidden = false;
     document.body.classList.add("playing");
 
-    subtitles = data.subtitles || [];
-    currentIndex = -1;
-    renderSubtitles();
-    subStats.textContent = `共 ${subtitles.length} 句 · 时长 ${formatTime(data.duration || 0)}`;
+    loadSubtitles(data.subtitles || []);
+    subStats.textContent = `${subtitles.length} sentences · ${formatTime(data.duration || 0)}`;
   }
 
   function onLoadedMetadata() {
@@ -166,24 +159,54 @@ const Player = (() => {
     }
   }
 
+  // Translation field map (matches backend services.translate.SUPPORTED_TARGET_LANGS)
+  const TRANSLATION_FIELDS = {
+    "Chinese": "zh",
+    "Chinese-Traditional": "zh-TW",
+    "Japanese": "ja",
+    "Korean": "ko",
+    "French": "fr",
+    "German": "de",
+    "Spanish": "es",
+    "Portuguese": "pt",
+    "Russian": "ru",
+    "Italian": "it",
+  };
+
+  let currentTranslationField = "";
+
   function renderSubtitles() {
     subtitleList.innerHTML = "";
-    const showZh = window.AppState.settings.showZh;
+    const showTranslation = !!currentTranslationField;
+    let renderedCount = 0;
+    let emptyCount = 0;
     subtitles.forEach((s, i) => {
       const li = document.createElement("li");
       li.className = "sub-item";
       li.dataset.idx = i;
+      let translationText = "";
+      if (showTranslation) {
+        const raw = s[currentTranslationField];
+        translationText = (typeof raw === "string") ? raw : "";
+      }
+      if (showTranslation) {
+        if (translationText) renderedCount++;
+        else emptyCount++;
+      }
       li.innerHTML = `
         <span class="sub-num">${i + 1}</span>
         <div class="sub-content">
           <div class="sub-en">${escapeHtml(s.en)}</div>
-          ${showZh && s.zh ? `<div class="sub-zh">${escapeHtml(s.zh)}</div>` : ""}
+          ${translationText ? `<div class="sub-zh sub-translation" data-translation-field="${currentTranslationField}">${escapeHtml(translationText)}</div>` : ""}
         </div>
         <span class="sub-time">${formatTime(s.start)}</span>
       `;
       li.addEventListener("click", () => jumpToSentence(i));
       subtitleList.appendChild(li);
     });
+    if (showTranslation) {
+      console.log(`[Player] Render translation: field=${currentTranslationField}, rendered=${renderedCount}/${subtitles.length}, empty=${emptyCount}`);
+    }
   }
 
   function reRenderSubtitles() {
@@ -238,13 +261,9 @@ const Player = (() => {
   }
 
   function togglePlay() {
-    // 检查是否是 YouTube 视频
     if (isYouTubeActive()) {
-      // YouTube 视频 - 使用 postMessage API
       const iframe = getYouTubeIframe();
       if (!iframe) return;
-      
-      // 切换播放状态（简化处理，实际应该查询状态）
       if (playBtn.textContent === '▶') {
         sendYouTubeCommand('playVideo');
         playBtn.textContent = '⏸';
@@ -275,26 +294,55 @@ const Player = (() => {
     if (video.src) video.currentTime = t;
   }
 
-  function loadSubtitles(newSubtitles) {
+  function loadSubtitles(newSubtitles, options = {}) {
     subtitles = newSubtitles || [];
     currentIndex = -1;
+    if (!options.skipAutoTranslation) {
+      const savedLang = window.AppState?.settings?.targetLang;
+      if (savedLang) {
+        const FIELD_MAP = {
+          "Chinese": "zh", "Chinese-Traditional": "zh-TW",
+          "Japanese": "ja", "Korean": "ko",
+          "French": "fr", "German": "de", "Spanish": "es",
+          "Portuguese": "pt", "Russian": "ru", "Italian": "it",
+        };
+        const field = FIELD_MAP[savedLang];
+        if (field && subtitles.some((s) => s[field] && String(s[field]).trim())) {
+          currentTranslationField = field;
+        }
+      }
+    }
     renderSubtitles();
-    subStats.textContent = `共 ${subtitles.length} 句`;
+    subStats.textContent = `${subtitles.length} sentences`;
   }
 
   function getSubtitlesCopy() {
     return subtitles.map((s) => ({ ...s }));
   }
 
+  // Legacy compatibility API (zh field)
   function setSubtitleZh(index, zh) {
     if (!subtitles[index]) return;
-    subtitles[index].zh = zh || "";
+    subtitles[index].zh = (typeof zh === "string") ? zh : "";
+  }
+
+  // Generic API for any field (zh / ja / ko / fr / ...)
+  function setSubtitleField(index, field, text) {
+    if (!subtitles[index]) return;
+    subtitles[index][field] = (typeof text === "string") ? text : "";
+  }
+
+  function setTranslationField(field) {
+    currentTranslationField = field || "";
   }
 
   function setAllSubtitleZh(zhList) {
     if (!Array.isArray(zhList)) return;
     subtitles.forEach((s, i) => {
-      if (i < zhList.length) s.zh = zhList[i] || "";
+      if (i < zhList.length) {
+        const val = zhList[i];
+        s.zh = (typeof val === "string") ? val : "";
+      }
     });
     reRenderSubtitles();
   }
@@ -308,28 +356,27 @@ const Player = (() => {
 
   function escapeHtml(s) {
     return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/\u0026/g, "\u0026amp;")
+      .replace(/\u003c/g, "\u0026lt;")
+      .replace(/\u003e/g, "\u0026gt;")
+      .replace(/"/g, "\u0026quot;");
   }
 
   function goPrev() { goRelative(-1); }
   function goNext() { goRelative(1); }
 
-  // 调试：在控制台查看字幕内容
   window.debugSubtitles = () => {
     console.table(subtitles.map((s, i) => ({
       idx: i + 1,
       start: s.start,
       en: s.en?.substring(0, 50),
-      zh: s.zh?.substring(0, 50) || "(空)",
+      zh: s.zh?.substring(0, 50) || "(empty)",
       hasZh: !!s.zh,
     })));
     return subtitles;
   };
 
-  // ========== 字幕列宽度拖拽 ==========
+  // Subtitle column resize drag
   function initResizer() {
     const resizer = document.getElementById("splitResizer");
     if (!resizer || !splitView) return;
@@ -359,7 +406,6 @@ const Player = (() => {
       const newLeftPct = startLeftPct + (dx / rect.width) * 100;
       const clamped = Math.max(25, Math.min(75, newLeftPct));
       splitView.style.gridTemplateColumns = `${clamped}% ${100 - clamped}%`;
-      // resizer 跟随交界点
       resizer.style.left = `${clamped}%`;
     };
     const onUp = () => {
@@ -384,6 +430,8 @@ const Player = (() => {
     loadSubtitles,
     getSubtitlesCopy,
     setSubtitleZh,
+    setSubtitleField,
+    setTranslationField,
     setAllSubtitleZh,
     play, pause, setRate, togglePlay,
     getCurrent, getSubtitles, getDuration, getCurrentTime, seekTo,

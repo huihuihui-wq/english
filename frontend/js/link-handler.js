@@ -1,4 +1,4 @@
-/** 视频链接处理 - 支持 YouTube 和普通视频链接 */
+/** Video link handler - supports YouTube and direct video links */
 const LinkHandler = (() => {
   let videoContainer, video, youtubePlayer;
   let youtubeIframe = null;
@@ -6,12 +6,10 @@ const LinkHandler = (() => {
   let currentSubtitles = [];
 
   function init() {
-    // 绑定标签页切换
     document.querySelectorAll('.input-tab').forEach(tab => {
       tab.addEventListener('click', () => switchInputTab(tab.dataset.tab));
     });
 
-    // 绑定加载按钮
     const loadBtn = document.getElementById('loadLinkBtn');
     const linkInput = document.getElementById('videoLinkInput');
     
@@ -25,7 +23,6 @@ const LinkHandler = (() => {
       });
     }
 
-    // 绑定示例链接
     document.querySelectorAll('.link-example').forEach(el => {
       el.addEventListener('click', () => {
         if (linkInput) {
@@ -35,7 +32,6 @@ const LinkHandler = (() => {
       });
     });
 
-    // 绑定字幕按钮
     const uploadSubBtn = document.getElementById('uploadSubBtn');
     const generateSubBtn = document.getElementById('generateSubBtn');
     const subFileInput = document.getElementById('subFileInput');
@@ -49,7 +45,6 @@ const LinkHandler = (() => {
       generateSubBtn.addEventListener('click', handleSubtitleGeneration);
     }
 
-    // 获取播放器元素
     videoContainer = document.getElementById('videoContainer');
     video = document.getElementById('video');
     youtubePlayer = document.getElementById('youtubePlayer');
@@ -69,7 +64,7 @@ const LinkHandler = (() => {
     const url = input.value.trim();
     
     if (!url) {
-      alert('请输入视频链接');
+      alert('Please enter a video URL');
       return;
     }
 
@@ -80,55 +75,42 @@ const LinkHandler = (() => {
     const progressFill = document.getElementById('linkProgressFill');
     
     progressWrap.hidden = false;
-    progressLabel.textContent = '正在解析链接...';
+    progressLabel.textContent = 'Parsing link...';
     progressFill.style.width = '30%';
 
     try {
       const youtubeId = extractYouTubeId(url);
       
       if (youtubeId) {
-        // YouTube 视频
-        progressLabel.textContent = '加载 YouTube 播放器...';
+        progressLabel.textContent = 'Loading YouTube player...';
         progressFill.style.width = '60%';
-        
         loadYouTubeVideo(youtubeId);
-        
         progressFill.style.width = '100%';
-        progressLabel.textContent = '加载完成！';
-        
-        // 显示播放器
+        progressLabel.textContent = 'Loaded!';
         showPlayer(`YouTube: ${youtubeId}`);
-        
       } else if (isDirectVideoUrl(url)) {
-        // 直接视频链接
-        progressLabel.textContent = '加载视频...';
+        progressLabel.textContent = 'Loading video...';
         progressFill.style.width = '60%';
-        
         loadDirectVideo(url);
-        
         progressFill.style.width = '100%';
-        progressLabel.textContent = '加载完成！';
-        
-        showPlayer(url.split('/').pop() || '在线视频');
+        progressLabel.textContent = 'Loaded!';
+        showPlayer(url.split('/').pop() || 'Online Video');
       } else {
-        throw new Error('不支持的链接格式。目前支持 YouTube 和 MP4/WebM 直接链接。');
+        throw new Error('Unsupported link format. Only YouTube and MP4/WebM direct links are supported.');
       }
 
-      // 显示字幕控制区域
       const subControls = document.getElementById('subtitleControls');
       if (subControls) subControls.hidden = false;
       
-      // 3秒后隐藏进度条
       setTimeout(() => {
         progressWrap.hidden = true;
       }, 1500);
 
     } catch (error) {
-      progressLabel.textContent = '加载失败';
+      progressLabel.textContent = 'Load failed';
       progressFill.style.width = '100%';
       progressFill.style.background = 'var(--danger)';
-      
-      alert(`加载失败: ${error.message}`);
+      alert(`Load failed: ${error.message}`);
       
       setTimeout(() => {
         progressWrap.hidden = true;
@@ -155,14 +137,10 @@ const LinkHandler = (() => {
   }
 
   function loadYouTubeVideo(videoId) {
-    // 隐藏普通视频，显示 YouTube 容器
     video.classList.add('hidden');
     youtubePlayer.classList.remove('hidden');
-    
-    // 清空之前的 iframe
     youtubePlayer.innerHTML = '';
     
-    // 创建 iframe
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
@@ -171,22 +149,14 @@ const LinkHandler = (() => {
     
     youtubePlayer.appendChild(iframe);
     youtubeIframe = iframe;
-
-    // 由于 YouTube iframe 的限制，我们无法直接控制播放/暂停
-    // 需要告诉用户 YouTube 播放器有自己的控制栏
     console.log('[LinkHandler] YouTube video loaded:', videoId);
   }
 
   function loadDirectVideo(url) {
-    // 显示普通视频，隐藏 YouTube
     video.classList.remove('hidden');
     youtubePlayer.classList.add('hidden');
-    
-    // 清空 YouTube iframe
     youtubePlayer.innerHTML = '';
     youtubeIframe = null;
-    
-    // 设置视频源
     video.src = url;
     video.load();
   }
@@ -198,61 +168,47 @@ const LinkHandler = (() => {
     if (fileNameEl) fileNameEl.textContent = title;
     if (splitWrap) splitWrap.hidden = false;
 
-    // 判断视频类型
     const isYouTube = extractYouTubeId(currentVideoUrl) !== null;
-
-    // 重置字幕
-    const subtitleCard = document.getElementById('subtitleCard');
     const subtitleList = document.getElementById('subtitleList');
     const subStats = document.getElementById('subStats');
 
-    if (subtitleCard) {
-      if (subtitleList) subtitleList.innerHTML = '';
-    }
+    if (subtitleList) subtitleList.innerHTML = '';
     
-    // 根据视频类型显示不同的提示
     const statusEl = document.getElementById('subtitleStatus');
     if (statusEl) {
       if (isYouTube) {
-        statusEl.innerHTML = '📺 <strong>YouTube 视频</strong><br><br>' +
-          '点击"🤖 AI 生成字幕"直接获取 YouTube 官方字幕（无需下载）<br><br>' +
-          '或点击"📤 上传字幕"上传自己的字幕文件<br><br>' +
-          '💡 中文翻译默认关闭；勾选右侧"显示中文"才会调用模型翻译';
+        statusEl.innerHTML = '📺 <strong>YouTube Video</strong><br><br>' +
+          'Click "🤖 AI Generate Subtitles" to fetch YouTube official/auto subtitles<br><br>' +
+          'Or click "📤 Upload Subtitle" to use your own SRT file<br><br>' +
+          '💡 Translation is off by default; select a target language on the right to translate';
         statusEl.className = 'subtitle-status';
-
-        if (subStats) {
-          subStats.innerHTML = '⬆️ 点击"AI 生成"获取 YouTube 字幕';
-        }
+        if (subStats) subStats.innerHTML = '⬆️ Click "AI Generate" to get YouTube subtitles';
       } else {
-        statusEl.innerHTML = '💡 <strong>在线视频</strong><br><br>' +
-          '您可以：<br>' +
-          '1. 点击"🤖 AI 生成"自动识别字幕<br>' +
-          '2. 点击"📤 上传字幕"上传 .srt 文件<br><br>' +
-          '💡 中文翻译默认关闭；勾选右侧"显示中文"才会调用模型翻译';
+        statusEl.innerHTML = '💡 <strong>Online Video</strong><br><br>' +
+          'Options:<br>' +
+          '1. Click "🤖 AI Generate" to auto-transcribe subtitles<br>' +
+          '2. Click "📤 Upload Subtitle" to upload an .srt file<br><br>' +
+          '💡 Translation is off by default; select a target language on the right to translate';
         statusEl.className = 'subtitle-status';
-
-        if (subStats) {
-          subStats.innerHTML = '⬆️ 请上传字幕文件或使用 AI 生成';
-        }
+        if (subStats) subStats.innerHTML = '⬆️ Upload a subtitle file or use AI Generate';
       }
     }
 
-    // 更新状态
     const topStatus = document.getElementById('status');
     if (topStatus) {
-      topStatus.textContent = '就绪';
+      topStatus.textContent = 'Ready';
       topStatus.className = 'status ready';
     }
   }
 
-  // ========== 字幕处理 ==========
+  // Subtitle handling
   
   function handleSubtitleUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
     const statusEl = document.getElementById('subtitleStatus');
-    statusEl.textContent = '正在解析字幕...';
+    statusEl.textContent = 'Parsing subtitle...';
     statusEl.className = 'subtitle-status loading';
 
     const reader = new FileReader();
@@ -262,34 +218,34 @@ const LinkHandler = (() => {
         const subtitles = parseSRT(content);
         
         if (subtitles.length === 0) {
-          throw new Error('字幕文件解析失败，请检查格式');
+          throw new Error('Failed to parse subtitle file. Please check the format.');
         }
         
         currentSubtitles = subtitles;
         loadSubtitlesIntoPlayer(subtitles);
 
-        // 保存到历史记录
         if (window.History && window.History.save && currentVideoUrl) {
           const ytId = extractYouTubeId(currentVideoUrl);
           const dur = subtitles[subtitles.length - 1]?.end || 0;
+          const firstSub = subtitles[0] || {};
           window.History.save({
             type: ytId ? "youtube" : "online_url",
-            title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || '在线视频'),
+            title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || 'Online Video'),
             source: ytId || currentVideoUrl,
             size_bytes: 0,
             duration: dur,
             subtitles: subtitles,
             raw_text: "",
+            source_lang: firstSub.source_lang || "en",
           });
         }
 
-        statusEl.textContent = `✅ 字幕加载成功！共 ${subtitles.length} 句`;
+        statusEl.textContent = `✅ Subtitle loaded! ${subtitles.length} sentences`;
         statusEl.className = 'subtitle-status success';
         
-        // 更新统计
         const subStats = document.getElementById('subStats');
         if (subStats && video.duration) {
-          subStats.textContent = `共 ${subtitles.length} 句 · 时长 ${formatTime(video.duration)}`;
+          subStats.textContent = `${subtitles.length} sentences · ${formatTime(video.duration)}`;
         }
         
       } catch (error) {
@@ -302,7 +258,7 @@ const LinkHandler = (() => {
 
   async function handleSubtitleGeneration() {
     if (!currentVideoUrl) {
-      alert('请先加载视频');
+      alert('Please load a video first');
       return;
     }
 
@@ -310,85 +266,74 @@ const LinkHandler = (() => {
     const isYouTube = extractYouTubeId(currentVideoUrl) !== null;
     
     if (isYouTube) {
-      statusEl.textContent = '📺 正在获取 YouTube 官方字幕...';
+      statusEl.textContent = '📺 Fetching YouTube subtitles...';
     } else {
-      statusEl.textContent = '🤖 AI 正在生成字幕，请稍候（可能需要 30-120 秒）...';
+      statusEl.textContent = '🤖 AI is generating subtitles (may take 30-120s)...';
     }
     statusEl.className = 'subtitle-status loading';
 
     try {
       const response = await fetch('/api/generate-subtitles', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          video_url: currentVideoUrl,
-          language: 'en',
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_url: currentVideoUrl, language: 'en' }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || '字幕生成失败');
+        throw new Error(error.detail || 'Subtitle generation failed');
       }
 
       const data = await response.json();
       
       if (!data.subtitles || data.subtitles.length === 0) {
-        throw new Error('未能识别到语音内容');
+        throw new Error('No speech content detected');
       }
 
       currentSubtitles = data.subtitles;
       loadSubtitlesIntoPlayer(data.subtitles);
 
-      // 保存到历史记录
       if (window.History && window.History.save) {
         const ytId = extractYouTubeId(currentVideoUrl);
         const dur = data.duration || data.subtitles[data.subtitles.length - 1]?.end || 0;
+        const firstSub = (data.subtitles && data.subtitles[0]) || {};
         window.History.save({
           type: ytId ? "youtube" : "online_url",
-          title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || '在线视频'),
+          title: ytId ? `YouTube: ${ytId}` : (currentVideoUrl.split('/').pop() || 'Online Video'),
           source: ytId || currentVideoUrl,
           size_bytes: 0,
           duration: dur,
           subtitles: data.subtitles || [],
           raw_text: data.raw_text || "",
+          source_lang: firstSub.source_lang || data.source_lang || "en",
         });
       }
 
-      // 显示成功信息
       const source = data.source || 'ai';
       const isAuto = data.is_auto_generated || false;
 
-      if (source === 'youtube_official') {
-        const autoText = isAuto ? '（自动生成）' : '（官方字幕）';
-        statusEl.innerHTML = `✅ YouTube 字幕获取成功${autoText}！共 ${data.subtitles.length} 句<br>💡 勾选「显示中文」可调用模型翻译中文`;
+      if (source === 'youtube_official' || source === 'ytdlp_official') {
+        statusEl.innerHTML = `✅ YouTube official subtitles loaded! ${data.subtitles.length} sentences<br>💡 Select a translation language on the right to translate`;
+      } else if (source === 'youtube_automatic' || source === 'ytdlp_automatic') {
+        statusEl.innerHTML = `✅ YouTube auto-generated subtitles loaded! ${data.subtitles.length} sentences<br>💡 Select a translation language on the right to translate`;
+      } else if (source === 'ai_recognition_fallback') {
+        const reason = data.fallback_reason ? `(${String(data.fallback_reason).split('\n')[0].slice(0, 60)}…)` : '';
+        statusEl.innerHTML = `✅ AI subtitles generated! ${data.subtitles.length} sentences ${reason}<br>💡 Select a translation language on the right to translate`;
       } else {
-        statusEl.innerHTML = `✅ AI 字幕生成成功！共 ${data.subtitles.length} 句<br>💡 勾选「显示中文」可调用模型翻译中文`;
+        statusEl.innerHTML = `✅ AI subtitles generated! ${data.subtitles.length} sentences<br>💡 Select a translation language on the right to translate`;
       }
       statusEl.className = 'subtitle-status success';
 
-      // 更新统计
       const subStats = document.getElementById('subStats');
       if (subStats) {
         const duration = data.subtitles[data.subtitles.length - 1]?.end || 0;
-        subStats.textContent = `共 ${data.subtitles.length} 句 · 时长 ${formatTime(duration)}`;
+        subStats.textContent = `${data.subtitles.length} sentences · ${formatTime(duration)}`;
       }
 
     } catch (error) {
-      let errorMsg = error.message;
-      
-      // 检查是否是 OSS 未配置错误
-      if (errorMsg.includes('OSS')) {
-        errorMsg = 'AI 字幕生成需要配置阿里云 OSS<br><br>' +
-          '请在 backend/.env 中添加 OSS 配置<br>' +
-          '或直接使用"上传字幕"功能';
-      }
-      
-      statusEl.innerHTML = `❌ ${errorMsg.replace(/\n/g, '<br>')}`;
+      statusEl.innerHTML = `❌ ${error.message.replace(/\n/g, '<br>')}`;
       statusEl.className = 'subtitle-status error';
-      console.error('字幕生成失败:', error);
+      console.error('Subtitle generation failed:', error);
     }
   }
 
@@ -400,30 +345,22 @@ const LinkHandler = (() => {
       const lines = block.trim().split('\n');
       if (lines.length < 3) continue;
       
-      // 找到时间行
       const timeLine = lines.find(line => line.includes('-->'));
       if (!timeLine) continue;
       
-      // 解析时间
-      const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
+      const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*--\u003e\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/);
       if (!timeMatch) continue;
       
       const start = parseTime(timeMatch[1]);
       const end = parseTime(timeMatch[2]);
       
-      // 获取文本（跳过序号和时间行）
       const textLines = lines.filter(line => 
         line !== lines[0] && !line.includes('-->')
       );
       const text = textLines.join(' ').trim();
       
       if (text) {
-        subtitles.push({
-          start,
-          end,
-          en: text,
-          zh: '',
-        });
+        subtitles.push({ start, end, en: text, zh: '' });
       }
     }
     
@@ -438,12 +375,12 @@ const LinkHandler = (() => {
   }
 
   function loadSubtitlesIntoPlayer(subtitles) {
-    // 触发事件让 Player 加载字幕
+    const firstSub = (subtitles && subtitles[0]) || {};
+    if (window.AppState) window.AppState.currentSourceLang = firstSub.source_lang || "en";
     window.dispatchEvent(new CustomEvent('link:subtitles-loaded', {
       detail: { subtitles }
     }));
     
-    // 如果 Player 有直接加载方法，使用它
     if (window.Player && window.Player.loadSubtitles) {
       window.Player.loadSubtitles(subtitles);
     }
@@ -456,7 +393,6 @@ const LinkHandler = (() => {
     return `${m}:${String(s).padStart(2, '0')}`;
   }
 
-  // 提供给外部使用的方法
   function getCurrentSubtitles() {
     return currentSubtitles;
   }
