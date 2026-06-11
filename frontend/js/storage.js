@@ -100,4 +100,5 @@ const NativeLang = (() => {
   return { load, current, set, onChange, detect };
 })();
 
+window.Storage = Storage;
 window.NativeLang = NativeLang;
