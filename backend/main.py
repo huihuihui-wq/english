@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from services import config as app_config
+from services import dictionary as dict_service
+from services import vocabulary as vocab_service
 from services.asr import transcribe_audio
 from services.subtitle import (
     _fallback_proportional,
@@ -29,6 +31,8 @@ from services.subtitle import (
 )
 from services.translate import translate_sentences
 from services.voice_service import synthesize as tts_synthesize
+from services.word_tts import synthesize_word
+from services.word_tokenize import is_english_word, lemma, normalize_for_lookup
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -120,6 +124,22 @@ class TTSRequest(BaseModel):
     text: str
     voice: str = "Cherry"
     language_type: str = "English"
+
+
+class WordLookupRequest(BaseModel):
+    word: str
+    force_refresh: bool = False
+
+
+class VocabularyAddRequest(BaseModel):
+    word: str
+    lemma: Optional[str] = None
+    phonetic: Optional[str] = ""
+    pos: Optional[str] = ""
+    meaning_zh: Optional[str] = ""
+    meaning_en: Optional[str] = ""
+    example: Optional[dict] = None
+    source_history_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -843,6 +863,103 @@ async def tts_voices(language_type: str = "English"):
         "default": get_default_voice(language_type),
         "language_type": language_type,
     }
+
+
+# ---------------------------------------------------------------------------
+# Word lookup & vocabulary
+# ---------------------------------------------------------------------------
+@app.get("/api/word/lookup")
+async def word_lookup(word: str, force_refresh: bool = False):
+    if not word or not word.strip():
+        raise HTTPException(400, "word is required")
+    if not is_english_word(word):
+        raise HTTPException(400, f"unsupported token: {word!r}")
+    target = normalize_for_lookup(word)
+    try:
+        if force_refresh:
+            dict_service.invalidate(target)
+        entry = await dict_service.lookup_word(target)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.exception("[word/lookup] failed for %s", word)
+        raise HTTPException(502, f"dictionary error: {e}")
+    if "lemma" not in entry or not entry.get("lemma"):
+        entry["lemma"] = lemma(target)
+    return {**entry, "saved": vocab_service.has_word(target)}
+
+
+@app.get("/api/word/tts")
+async def word_tts(word: str, voice: str = "Cherry", language_type: str = "English"):
+    if not word or not word.strip():
+        raise HTTPException(400, "word is required")
+    if not is_english_word(word):
+        raise HTTPException(400, f"unsupported token: {word!r}")
+    try:
+        audio_bytes, meta = await synthesize_word(word, voice=voice, language_type=language_type)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        if "not configured" in str(e).lower():
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, str(e))
+    except Exception as e:
+        logger.exception("[word/tts] failed for %s", word)
+        raise HTTPException(500, f"tts error: {e}")
+    headers = {
+        "X-Cache": "HIT" if meta.get("cached") else "MISS",
+        "X-Voice": meta.get("voice", voice),
+    }
+    return Response(content=audio_bytes, media_type="audio/mpeg", headers=headers)
+
+
+@app.get("/api/vocabulary")
+async def vocabulary_list():
+    return {"items": vocab_service.list_words(), "stats": vocab_service.stats()}
+
+
+@app.post("/api/vocabulary")
+async def vocabulary_add(req: VocabularyAddRequest):
+    word = (req.word or "").strip()
+    if not word:
+        raise HTTPException(400, "word is required")
+    if not is_english_word(word):
+        raise HTTPException(400, f"unsupported token: {word!r}")
+    try:
+        record = vocab_service.add_word({
+            "word": word,
+            "lemma": req.lemma or lemma(word),
+            "phonetic": req.phonetic or "",
+            "pos": req.pos or "",
+            "meaning_zh": req.meaning_zh or "",
+            "meaning_en": req.meaning_en or "",
+            "example": req.example,
+            "source_history_id": req.source_history_id,
+        })
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "item": record}
+
+
+@app.delete("/api/vocabulary/{word}")
+async def vocabulary_remove(word: str):
+    from urllib.parse import unquote
+    decoded = unquote(word).strip()
+    if not decoded:
+        raise HTTPException(400, "word is required")
+    removed = vocab_service.remove_word(decoded)
+    if not removed:
+        raise HTTPException(404, f"word not in vocabulary: {decoded}")
+    return {"ok": True, "word": decoded, "removed": True}
+
+
+@app.get("/api/vocabulary/check/{word}")
+async def vocabulary_check(word: str):
+    from urllib.parse import unquote
+    decoded = unquote(word).strip()
+    return {"word": decoded, "saved": vocab_service.has_word(decoded)}
 
 
 # ---------------------------------------------------------------------------

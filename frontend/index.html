@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shadow Reader</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/style.css?v=2" />
 </head>
 <body>
   <header class="topbar">
@@ -26,6 +26,7 @@
     <button class="tab-btn active" data-tab="shadow">🎧 Shadowing</button>
     <button class="tab-btn" data-tab="tts">🎙 TTS Test</button>
     <button class="tab-btn" data-tab="history">📚 History</button>
+    <button class="tab-btn" data-tab="vocab">📖 Vocabulary</button>
   </nav>
 
   <main class="container">
@@ -245,6 +246,27 @@
     </div>
     <!-- /Tab: History -->
 
+    <!-- Tab: Vocabulary -->
+    <div id="tab-vocab" class="tab-panel hidden">
+      <section class="card vocab-card">
+        <div class="vocab-header">
+          <div>
+            <h2 style="font-size:16px; margin-bottom:4px;">📖 Vocabulary</h2>
+            <p class="vocab-sub" id="vocabSub">Loading…</p>
+          </div>
+          <div class="vocab-actions">
+            <input type="search" id="vocabSearch" class="vocab-search" placeholder="Search words…" autocomplete="off" />
+            <button class="btn ghost" id="vocabExportBtn" title="Export JSON">⬇ Export</button>
+            <button class="btn ghost" id="vocabRefreshBtn" title="Refresh">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="vocabList" class="vocab-list">
+          <div class="vocab-empty">No saved words yet. Click any word in a subtitle to look it up and save.</div>
+        </div>
+      </section>
+    </div>
+    <!-- /Tab: Vocabulary -->
+
     <!-- Tab: TTS Test -->
     <div id="tab-tts" class="tab-panel hidden">
       <section class="card tts-card">
@@ -347,14 +369,43 @@
     <span>Shadow Reader · Powered by DashScope qwen-asr-flash + qwen-plus + sambert</span>
   </footer>
 
-  <script src="/static/js/storage.js"></script>
-  <script src="/static/js/uploader.js"></script>
-  <script src="/static/js/link-handler.js"></script>
-  <script src="/static/js/player.js"></script>
-  <script src="/static/js/shadow.js"></script>
-  <script src="/static/js/history.js"></script>
-  <script src="/static/js/tts-tab.js"></script>
-  <script src="/static/js/settings.js"></script>
-  <script src="/static/js/app.js"></script>
+  <!-- Word lookup popover (singleton, positioned by JS) -->
+  <div id="wordPopover" class="word-popover" hidden>
+    <div class="wp-head">
+      <div class="wp-title-row">
+        <span class="wp-word" id="wpWord"></span>
+        <span class="wp-phonetic" id="wpPhonetic"></span>
+        <button class="wp-icon-btn" id="wpSpeak" title="Pronounce">🔊</button>
+        <button class="wp-icon-btn wp-close" id="wpClose" title="Close">✕</button>
+      </div>
+      <div class="wp-pos" id="wpPos"></div>
+    </div>
+    <div class="wp-body" id="wpBody">
+      <div class="wp-skeleton">
+        <div class="wp-skel-line"></div>
+        <div class="wp-skel-line short"></div>
+        <div class="wp-skel-line"></div>
+      </div>
+    </div>
+    <div class="wp-foot">
+      <span class="wp-source" id="wpSource"></span>
+      <div class="wp-foot-actions">
+        <button class="wp-btn ghost" id="wpRefresh" title="Regenerate (re-query)">🔄</button>
+        <button class="wp-btn" id="wpSave" title="Add to vocabulary">☆ Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/storage.js?v=2"></script>
+  <script src="/static/js/uploader.js?v=2"></script>
+  <script src="/static/js/link-handler.js?v=2"></script>
+  <script src="/static/js/player.js?v=2"></script>
+  <script src="/static/js/shadow.js?v=2"></script>
+  <script src="/static/js/history.js?v=2"></script>
+  <script src="/static/js/tts-tab.js?v=2"></script>
+  <script src="/static/js/settings.js?v=2"></script>
+  <script src="/static/js/word-lookup.js?v=1"></script>
+  <script src="/static/js/vocabulary.js?v=1"></script>
+  <script src="/static/js/app.js?v=2"></script>
 </body>
 </html>

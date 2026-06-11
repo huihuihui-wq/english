@@ -196,12 +196,20 @@ const Player = (() => {
       li.innerHTML = `
         <span class="sub-num">${i + 1}</span>
         <div class="sub-content">
-          <div class="sub-en">${escapeHtml(s.en)}</div>
+          <div class="sub-en">${renderWordsHtml(s.en || "")}</div>
           ${translationText ? `<div class="sub-zh sub-translation" data-translation-field="${currentTranslationField}">${escapeHtml(translationText)}</div>` : ""}
         </div>
         <span class="sub-time">${formatTime(s.start)}</span>
       `;
-      li.addEventListener("click", () => jumpToSentence(i));
+      li.addEventListener("click", (ev) => {
+        const wordEl = ev.target.closest(".word");
+        if (wordEl && window.WordLookup) {
+          ev.stopPropagation();
+          window.WordLookup.show(wordEl, s);
+          return;
+        }
+        jumpToSentence(i);
+      });
       subtitleList.appendChild(li);
     });
     if (showTranslation) {
@@ -356,10 +364,36 @@ const Player = (() => {
 
   function escapeHtml(s) {
     return String(s)
-      .replace(/\u0026/g, "\u0026amp;")
-      .replace(/\u003c/g, "\u0026lt;")
-      .replace(/\u003e/g, "\u0026gt;")
-      .replace(/"/g, "\u0026quot;");
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  const _WORD_RE = /[A-Za-z][A-Za-z'\-]*|[0-9]+|[^A-Za-z0-9\s]+|\s+/g;
+
+  function isEnglishWordToken(t) {
+    if (!t) return false;
+    if (!/^[A-Za-z]/.test(t)) return false;
+    return /^[A-Za-z][A-Za-z'\-]*$/.test(t);
+  }
+
+  function renderWordsHtml(text) {
+    if (!text) return "";
+    const out = [];
+    let m;
+    _WORD_RE.lastIndex = 0;
+    while ((m = _WORD_RE.exec(text)) !== null) {
+      const tok = m[0];
+      if (tok.isspace || /^\s+$/.test(tok)) {
+        out.push(escapeHtml(tok));
+      } else if (isEnglishWordToken(tok)) {
+        out.push(`<span class="word" data-word="${escapeHtml(tok)}">${escapeHtml(tok)}</span>`);
+      } else {
+        out.push(`<span class="word-punct">${escapeHtml(tok)}</span>`);
+      }
+    }
+    return out.join("");
   }
 
   function goPrev() { goRelative(-1); }
