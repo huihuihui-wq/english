@@ -1,0 +1,15 @@
+{
+  "word": "meaningful",
+  "lemma": "meaningful",
+  "phonetic": "/ˈminɪŋfʊl/",
+  "pos": "adjective",
+  "meaning_en": "Having meaning, significant.",
+  "meaning_zh": "",
+  "examples": [
+    {
+      "en": "I think we made a meaningful contribution to this project today.",
+      "zh": ""
+    }
+  ],
+  "source": "api:free-dict"
+}

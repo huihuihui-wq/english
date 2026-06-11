@@ -9,9 +9,47 @@ const App = (() => {
     Player.init();
     if (window.History) History.init();
     if (window.TTSTab) TTSTab.init();
+    if (window.Vocab) Vocab.init();
     bindControls();
     applySettings();
     initQuotaWidget();
+    initNativeLangSelector();
+  }
+
+  async function initNativeLangSelector() {
+    const sel = document.getElementById("nativeLangSel");
+    if (!sel) return;
+    // Auto-detect on first run, but respect existing setting
+    if (!settings.nativeLang || settings.nativeLang === "en") {
+      const detected = window.NativeLang.detect();
+      if (detected && detected !== settings.nativeLang) {
+        settings.nativeLang = detected;
+        Storage.save(settings);
+        window.NativeLang.set(detected, { persistBackend: false });
+      }
+    }
+    const langs = await window.NativeLang.load();
+    sel.innerHTML = langs
+      .map((l) => `<option value="${l.id}">${l.native || l.name}</option>`)
+      .join("");
+    sel.value = window.NativeLang.current();
+    sel.addEventListener("change", (e) => {
+      window.NativeLang.set(e.target.value);
+    });
+    window.NativeLang.onChange((lang) => {
+      if (sel.value !== lang) sel.value = lang;
+      if (window.Vocab && document.getElementById("tab-vocab") &&
+          !document.getElementById("tab-vocab").classList.contains("hidden")) {
+        window.Vocab.load();
+      }
+      if (window.showToast) {
+        window.showToast(
+          `🌐 Dictionary language: ${lang}`,
+          "info",
+          1800
+        );
+      }
+    });
   }
 
   function applySettings() {
@@ -408,6 +446,9 @@ const App = (() => {
     document.querySelectorAll(".tab-panel").forEach((panel) => {
       panel.classList.toggle("hidden", panel.id !== "tab-" + tabName);
     });
+    if (tabName === "vocab" && window.Vocab && typeof window.Vocab.load === "function") {
+      window.Vocab.load();
+    }
   }
 
   function setActiveSpeed(rate) {

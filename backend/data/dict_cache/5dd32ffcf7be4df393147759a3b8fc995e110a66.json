@@ -1,0 +1,15 @@
+{
+  "word": "state-of-the-art",
+  "lemma": "state-of-the-art",
+  "phonetic": "",
+  "pos": "noun",
+  "meaning_en": "The condition of scientific or technical knowledge, particularly the peak or highest level thereof, at a particular time.",
+  "meaning_zh": "",
+  "examples": [
+    {
+      "en": "state-of-the-art technology",
+      "zh": ""
+    }
+  ],
+  "source": "api:free-dict"
+}

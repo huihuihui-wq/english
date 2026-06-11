@@ -1,17 +1,21 @@
-"""English word dictionary lookup with 3-tier fallback.
+"""English word dictionary lookup with 3-tier fallback + i18n.
 
-Tier 0: local disk cache (data/dict_cache/<sha1>.json)
+Tier 0: local disk cache (data/dict_cache/<sha1(word)>.json) — schema stores
+        the base English entry plus a `translations` map keyed by target lang.
 Tier 1: free public API (https://api.dictionaryapi.dev/api/v2/entries/en/<word>)
-Tier 2: DashScope qwen-plus (strict-JSON prompt, only when L1 misses)
+        — supplies English meaning/examples only.
+Tier 2: DashScope qwen-plus — supplies:
+        - full English entry when L1 misses
+        - translation of meaning/examples into the requested native lang
 
-Only English words are supported (project scope).
+Only English words are looked up; explanations can be in any of the supported
+native languages (en, zh, ja, ko, fr, de, es, pt, ru, it).
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import os
 import re
 import threading
 from pathlib import Path
@@ -20,6 +24,7 @@ from typing import Any, Optional
 import httpx
 
 from services.config import get_dashscope_api_key, get_setting
+from services.word_tokenize import is_english_word
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,38 @@ FREE_DICT_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
 LLM_TIMEOUT = 8.0
 HTTP_TIMEOUT = 4.0
 
+# Languages supported for the native meaning / examples. Codes align with the
+# translate service in services/translate.py for consistency.
+SUPPORTED_DICT_LANGS: list[dict] = [
+    {"id": "en", "name": "English",        "native": "English"},
+    {"id": "zh", "name": "Chinese (Simplified)", "native": "简体中文"},
+    {"id": "ja", "name": "Japanese",       "native": "日本語"},
+    {"id": "ko", "name": "Korean",         "native": "한국어"},
+    {"id": "fr", "name": "French",         "native": "Français"},
+    {"id": "de", "name": "German",         "native": "Deutsch"},
+    {"id": "es", "name": "Spanish",        "native": "Español"},
+    {"id": "pt", "name": "Portuguese",     "native": "Português"},
+    {"id": "ru", "name": "Russian",        "native": "Русский"},
+    {"id": "it", "name": "Italian",        "native": "Italiano"},
+]
+_DICT_LANG_IDS = {x["id"] for x in SUPPORTED_DICT_LANGS}
+_DICT_LANG_NAMES = {x["id"]: x["name"] for x in SUPPORTED_DICT_LANGS}
+
+DEFAULT_DICT_LANG = "en"
+
+
+def normalize_target_lang(lang: Optional[str]) -> str:
+    if not lang:
+        return DEFAULT_DICT_LANG
+    lang = lang.strip().lower()
+    if lang in _DICT_LANG_IDS:
+        return lang
+    # Map common aliases
+    aliases = {"zh-cn": "zh", "zh-hans": "zh", "chinese": "zh", "cn": "zh",
+               "ja-jp": "ja", "japanese": "ja", "jp": "ja",
+               "ko-kr": "ko", "korean": "ko", "kr": "ko"}
+    return aliases.get(lang, DEFAULT_DICT_LANG)
+
 
 def _cache_key(word: str) -> str:
     return hashlib.sha1(word.strip().lower().encode("utf-8")).hexdigest()
@@ -42,12 +79,6 @@ def _cache_key(word: str) -> str:
 
 def _cache_path(word: str) -> Path:
     return CACHE_DIR / f"{_cache_key(word)}.json"
-
-
-def _is_english_word(word: str) -> bool:
-    if not word:
-        return False
-    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]*", word))
 
 
 def _read_disk_cache(word: str) -> Optional[dict]:
@@ -86,7 +117,6 @@ def _parse_free_dict(data: Any, original: str) -> Optional[dict]:
                     break
 
         pos = ""
-        meaning_zh = ""
         meaning_en = ""
         examples: list[dict] = []
 
@@ -98,7 +128,7 @@ def _parse_free_dict(data: Any, original: str) -> Optional[dict]:
                     meaning_en = definition
                 ex = (d.get("example") or "").strip()
                 if ex and len(examples) < 2:
-                    examples.append({"en": ex, "zh": ""})
+                    examples.append({"en": ex})
                 if len(examples) >= 2 and meaning_en:
                     break
             if meaning_en and len(examples) >= 2:
@@ -113,8 +143,8 @@ def _parse_free_dict(data: Any, original: str) -> Optional[dict]:
             "phonetic": phonetic or "",
             "pos": pos or "",
             "meaning_en": meaning_en,
-            "meaning_zh": meaning_zh,
             "examples": examples,
+            "translations": {},
             "source": "api:free-dict",
         }
     except Exception as e:
@@ -140,7 +170,10 @@ async def _lookup_free_dict(word: str) -> Optional[dict]:
     return _parse_free_dict(data, word)
 
 
-async def _lookup_llm(word: str) -> Optional[dict]:
+async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict]:
+    """Ask the LLM for a full English entry, plus a translation into target_lang
+    when target_lang is non-English.
+    """
     api_key = get_dashscope_api_key()
     if not api_key:
         return None
@@ -150,16 +183,31 @@ async def _lookup_llm(word: str) -> Optional[dict]:
     )
     model = get_setting("TRANSLATE_MODEL", "qwen-plus")
 
-    system_prompt = (
-        "You are a strict English dictionary API. "
-        "For the given English word, output ONLY one JSON object with these exact keys: "
-        '"phonetic" (IPA string, may be empty), '
-        '"pos" (part of speech: noun/verb/adjective/adverb/preposition/conjunction/pronoun/interjection/exclamation, may be empty), '
-        '"meaning_zh" (concise Chinese definition, 1-2 short phrases separated by semicolons), '
-        '"meaning_en" (concise English definition, 1 sentence), '
-        '"examples" (array of up to 2 objects with keys "en" and "zh", use natural sentences). '
-        "No markdown, no code fences, no explanation. Output JSON only."
-    )
+    target_name = _DICT_LANG_NAMES.get(target_lang, "English")
+    needs_translation = target_lang != "en"
+
+    if needs_translation:
+        system_prompt = (
+            "You are a strict English dictionary API with built-in translation. "
+            f"For the given English word, output ONLY one JSON object with these exact keys: "
+            '"phonetic" (IPA string, may be empty), '
+            '"pos" (part of speech: noun/verb/adjective/adverb/preposition/conjunction/pronoun/interjection/exclamation, may be empty), '
+            '"meaning_en" (concise English definition, 1 sentence), '
+            f'"meaning_translation" (concise {target_name} definition, 1-2 short phrases), '
+            '"examples" (array of up to 2 objects, each with keys "en" (natural English example sentence) '
+            f'and "translation" (the {target_name} translation of that sentence)). '
+            "No markdown, no code fences, no explanation. Output JSON only."
+        )
+    else:
+        system_prompt = (
+            "You are a strict English dictionary API. "
+            "For the given English word, output ONLY one JSON object with these exact keys: "
+            '"phonetic" (IPA string, may be empty), '
+            '"pos" (part of speech: noun/verb/adjective/adverb/preposition/conjunction/pronoun/interjection/exclamation, may be empty), '
+            '"meaning_en" (concise English definition, 1 sentence), '
+            '"examples" (array of up to 2 objects, each with key "en" (natural English example sentence)). '
+            "No markdown, no code fences, no explanation. Output JSON only."
+        )
     user_prompt = f'Word: "{word.lower()}"'
 
     body = {
@@ -213,61 +261,245 @@ async def _lookup_llm(word: str) -> Optional[dict]:
         for ex in examples_raw[:2]:
             if isinstance(ex, dict):
                 en = (ex.get("en") or "").strip()
-                zh = (ex.get("zh") or "").strip()
-                if en:
-                    examples.append({"en": en, "zh": zh})
+                if not en:
+                    continue
+                entry_ex: dict = {"en": en}
+                if needs_translation:
+                    tr = (ex.get("translation") or "").strip()
+                    if tr:
+                        entry_ex[target_lang] = tr
+                examples.append(entry_ex)
             elif isinstance(ex, str) and ex.strip():
-                examples.append({"en": ex.strip(), "zh": ""})
+                examples.append({"en": ex.strip()})
 
-    return {
+    entry: dict = {
         "word": word,
         "lemma": word.lower(),
         "phonetic": (obj.get("phonetic") or "").strip(),
         "pos": (obj.get("pos") or "").strip(),
-        "meaning_zh": (obj.get("meaning_zh") or "").strip(),
         "meaning_en": (obj.get("meaning_en") or "").strip(),
         "examples": examples,
+        "translations": {},
+        "source": "llm:qwen-plus",
+    }
+    if needs_translation:
+        mt = (obj.get("meaning_translation") or "").strip()
+        if mt:
+            entry["translations"] = {
+                target_lang: {
+                    "meaning": mt,
+                    "source": "llm:qwen-plus",
+                }
+            }
+    return entry
+
+
+async def _llm_translate_entry(entry: dict, target_lang: str) -> Optional[dict]:
+    """Translate an existing English-only entry (e.g. from L1) into target_lang.
+
+    Mutates the entry by setting `translations[target_lang]` and per-example
+    `<target_lang>` fields, then returns the new translation sub-record.
+    """
+    api_key = get_dashscope_api_key()
+    if not api_key:
+        return None
+    base_url = get_setting(
+        "DASHSCOPE_COMPATIBLE_URL",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    model = get_setting("TRANSLATE_MODEL", "qwen-plus")
+    target_name = _DICT_LANG_NAMES.get(target_lang, target_lang)
+
+    examples_en = [ex.get("en", "") for ex in (entry.get("examples") or []) if ex.get("en")]
+    payload = {
+        "meaning_en": entry.get("meaning_en", ""),
+        "examples_en": examples_en,
+    }
+    system_prompt = (
+        f"You are a translation engine from English to {target_name}. "
+        "Given a JSON object with `meaning_en` (English definition) and `examples_en` "
+        "(a list of up to 2 English example sentences), output ONLY one JSON object with: "
+        f'"meaning" (concise {target_name} definition, 1-2 short phrases), '
+        f'"examples" (array of strings, each the {target_name} translation of the corresponding English example, same order). '
+        "If a field is missing in the input, return an empty string or empty array for the corresponding output. "
+        "No markdown, no code fences, no explanation. Output JSON only."
+    )
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    endpoint = f"{base_url}/chat/completions"
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+            resp = await client.post(endpoint, headers=headers, json=body)
+    except Exception as e:
+        logger.warning("[dict] LLM translate failed for %s/%s: %s", entry.get("word"), target_lang, e)
+        return None
+    if resp.status_code != 200:
+        logger.warning("[dict] LLM translate HTTP %d for %s/%s: %s", resp.status_code, entry.get("word"), target_lang, resp.text[:200])
+        return None
+    try:
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.warning("[dict] LLM translate parse failed: %s", e)
+        return None
+
+    text = re.sub(r"^```(?:json)?\s*", "", content.strip())
+    text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(obj, dict):
+        return None
+
+    meaning = (obj.get("meaning") or "").strip()
+    examples_tr_raw = obj.get("examples") or []
+    examples_tr: list[str] = []
+    if isinstance(examples_tr_raw, list):
+        for x in examples_tr_raw[: len(examples_en)]:
+            if isinstance(x, str):
+                examples_tr.append(x.strip())
+            elif isinstance(x, dict):
+                first = next((v for v in x.values() if isinstance(v, str)), "")
+                examples_tr.append(first.strip())
+
+    if not meaning and not any(examples_tr):
+        return None
+
+    return {
+        "meaning": meaning,
+        "examples": examples_tr,
         "source": "llm:qwen-plus",
     }
 
 
-async def lookup_word(word: str) -> dict:
-    """Look up an English word and return the standard WordEntry.
+def _apply_translation(entry: dict, lang: str, tr: dict) -> None:
+    """Apply a translation sub-record onto the entry (in-place)."""
+    entry.setdefault("translations", {})
+    entry["translations"][lang] = {"meaning": tr.get("meaning", ""), "source": tr.get("source", "llm:qwen-plus")}
+    # Splice per-example translations
+    ex_list = entry.get("examples") or []
+    ex_tr = tr.get("examples") or []
+    for i, ex in enumerate(ex_list):
+        if i < len(ex_tr) and ex_tr[i] and isinstance(ex, dict):
+            ex[lang] = ex_tr[i]
 
-    Raises ValueError for non-English / empty input.
-    Raises LookupError if all tiers fail.
+
+def _build_response(entry: dict, word: str, target_lang: str, hit_source: str) -> dict:
+    """Shape the entry into the response the client sees."""
+    tr = (entry.get("translations") or {}).get(target_lang) or {}
+    meaning_native = tr.get("meaning", "") if target_lang != "en" else entry.get("meaning_en", "")
+    if target_lang == "en":
+        meaning_native = entry.get("meaning_en", "")
+
+    examples = []
+    for ex in (entry.get("examples") or []):
+        if not isinstance(ex, dict):
+            continue
+        en = ex.get("en", "")
+        if not en:
+            continue
+        ex_out: dict = {"en": en}
+        if target_lang != "en":
+            tr_text = ex.get(target_lang, "")
+            if tr_text:
+                ex_out[target_lang] = tr_text
+        examples.append(ex_out)
+
+    return {
+        "word": entry.get("word") or word,
+        "lemma": entry.get("lemma") or word.lower(),
+        "phonetic": entry.get("phonetic", ""),
+        "pos": entry.get("pos", ""),
+        "meaning_en": entry.get("meaning_en", ""),
+        "meaning_native": meaning_native,
+        "native_lang": target_lang,
+        "examples": examples,
+        "source": hit_source,
+    }
+
+
+async def lookup_word(word: str, target_lang: Optional[str] = None) -> dict:
+    """Look up an English word and return the localized response.
+
+    Args:
+        word: the English word/token to look up
+        target_lang: native language for meaning/examples (e.g. "zh", "ja").
+                     Defaults to settings.DICT_LANG or "en".
+
+    Raises:
+        ValueError for non-English / empty input.
+        LookupError if all tiers fail.
     """
     if not word or not word.strip():
         raise ValueError("word is empty")
-    if not _is_english_word(word.strip()):
+    if not is_english_word(word.strip()):
         raise ValueError(f"unsupported token: {word!r}")
 
+    target_lang = normalize_target_lang(target_lang or get_setting("DICT_LANG", DEFAULT_DICT_LANG))
     key = word.strip().lower()
+
+    # L0: in-process memory cache (keyed per native lang too)
+    mem_key = f"{key}|{target_lang}"
     with _mem_lock:
-        if key in _mem_cache:
-            return {**_mem_cache[key], "source": "cache:memory"}
+        if mem_key in _mem_cache:
+            return {**_mem_cache[mem_key], "source": "cache:memory"}
 
     cached = _read_disk_cache(key)
     if cached:
+        # Ensure translations dict exists
+        cached.setdefault("translations", {})
+        tr = (cached.get("translations") or {}).get(target_lang)
+        if tr is None and target_lang != "en":
+            # Need to translate. Try LLM with the cached English as the base.
+            tr_record = await _llm_translate_entry(cached, target_lang)
+            if tr_record:
+                _apply_translation(cached, target_lang, tr_record)
+                _write_disk_cache(key, cached)
+        response = _build_response(cached, key, target_lang, "cache:disk")
         with _mem_lock:
-            _mem_cache[key] = cached
-        return {**cached, "source": "cache:disk"}
+            _mem_cache[mem_key] = response
+        return response
 
-    # L1: free public API
+    # L1: free public API (English only)
     entry = await _lookup_free_dict(key)
     if entry:
+        # Optionally translate to target_lang via LLM
+        if target_lang != "en":
+            tr_record = await _llm_translate_entry(entry, target_lang)
+            if tr_record:
+                _apply_translation(entry, target_lang, tr_record)
         _write_disk_cache(key, entry)
+        response = _build_response(entry, key, target_lang, entry.get("source", "api:free-dict"))
         with _mem_lock:
-            _mem_cache[key] = entry
-        return entry
+            _mem_cache[mem_key] = response
+        return response
 
-    # L2: LLM fallback
-    entry = await _lookup_llm(key)
-    if entry and (entry.get("meaning_zh") or entry.get("meaning_en")):
+    # L2: LLM full generation
+    entry = await _llm_generate_full_entry(key, target_lang)
+    if entry and (entry.get("meaning_en") or (entry.get("translations") or {}).get(target_lang)):
         _write_disk_cache(key, entry)
+        response = _build_response(entry, key, target_lang, "llm:qwen-plus")
         with _mem_lock:
-            _mem_cache[key] = entry
-        return entry
+            _mem_cache[mem_key] = response
+        return response
 
     raise LookupError(f"no definition found for {word!r}")
 
@@ -287,7 +519,9 @@ def invalidate(word: str) -> None:
     """Remove a word from memory + disk cache. Forces a fresh lookup next time."""
     key = word.strip().lower()
     with _mem_lock:
-        _mem_cache.pop(key, None)
+        keys_to_drop = [k for k in list(_mem_cache.keys()) if k == key or k.startswith(key + "|")]
+        for k in keys_to_drop:
+            _mem_cache.pop(k, None)
     try:
         _cache_path(key).unlink(missing_ok=True)
     except Exception as e:

@@ -1,4 +1,21 @@
 {
   "version": 1,
-  "words": []
+  "words": [
+    {
+      "word": "meaningful",
+      "lemma": "meaningful",
+      "phonetic": "/ˈminɪŋfʊl/",
+      "pos": "adjective",
+      "meaning_en": "Having meaning, significant.",
+      "example": {
+        "en": "I think we made a meaningful contribution to this project today.",
+        "native": ""
+      },
+      "source_history_id": "f8ccc8724f1d",
+      "added_at": "2026-06-11T02:12:56Z",
+      "updated_at": "2026-06-11T02:12:56Z",
+      "meaning_native": "",
+      "native_lang": "zh"
+    }
+  ]
 }

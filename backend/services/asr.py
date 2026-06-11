@@ -72,13 +72,17 @@ def _get_real_audio_duration_bytes(file_bytes: bytes) -> float:
 
 
 def detect_speech_segments(file_bytes: bytes, noise_db: int = -45, min_silence_duration: float = 1.0) -> tuple[list[dict], list[dict]]:
-    """Use ffmpeg silencedetect to find speech and non-speech segments.
+    """Use ffmpeg silencedetect with voice-band filtering to find speech segments.
 
-    Optimized parameters:
-    - noise_db: -45dB (more sensitive than -40dB, catches quieter gaps)
+    Key insight: silencedetect alone cannot distinguish speech from background music,
+    because music is not "silent". We add highpass+lowpass filters (200-3000Hz) to
+    isolate the human voice frequency range before running silencedetect.
+
+    Parameters:
+    - noise_db: -45dB (more sensitive, catches quieter gaps)
     - min_silence_duration: 1.0s (avoids fragmenting on short pauses)
-    - Filters out speech segments < 0.3s (applause, coughs)
-    - Merges speech segments with gaps < 1.5s (keeps conversation continuous)
+    - Filters out speech segments < 0.5s (applause, coughs)
+    - Merges speech segments with gaps < 2.0s
 
     Returns (speech_segments, non_speech_segments) with start_ms / end_ms.
     """
@@ -87,9 +91,16 @@ def detect_speech_segments(file_bytes: bytes, noise_db: int = -45, min_silence_d
         tmp = f.name
 
     try:
+        # Apply bandpass filter (300-2500Hz) to isolate human voice frequencies,
+        # then run silencedetect. Music typically has wider frequency range.
+        # We also use a lower noise threshold (-50dB) to catch quieter gaps.
+        af_chain = (
+            f"highpass=f=300,lowpass=f=2500,"
+            f"silencedetect=noise=-50dB:d=0.8"
+        )
         cmd = [
             "ffmpeg", "-y", "-i", tmp,
-            "-af", f"silencedetect=noise={noise_db}dB:d={min_silence_duration}",
+            "-af", af_chain,
             "-f", "null", "-",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -132,12 +143,12 @@ def detect_speech_segments(file_bytes: bytes, noise_db: int = -45, min_silence_d
         if cursor < duration:
             raw_speech.append({"start_ms": int(cursor * 1000), "end_ms": int(duration * 1000)})
 
-        # Filter: remove very short speech segments (applause, noise)
-        MIN_SPEECH_MS = 300
+        # Filter: remove very short speech segments (applause, coughs)
+        MIN_SPEECH_MS = 500
         filtered_speech = [s for s in raw_speech if s["end_ms"] - s["start_ms"] >= MIN_SPEECH_MS]
 
-        # Merge: combine speech segments with small gaps (< 1.5s)
-        GAP_THRESHOLD_MS = 1500
+        # Merge: combine speech segments with small gaps (< 2.0s)
+        GAP_THRESHOLD_MS = 2000
         merged_speech = []
         for seg in filtered_speech:
             if not merged_speech:
@@ -146,7 +157,6 @@ def detect_speech_segments(file_bytes: bytes, noise_db: int = -45, min_silence_d
                 last = merged_speech[-1]
                 gap = seg["start_ms"] - last["end_ms"]
                 if gap <= GAP_THRESHOLD_MS:
-                    # Merge: extend the last segment
                     last["end_ms"] = seg["end_ms"]
                 else:
                     merged_speech.append(seg)
@@ -184,6 +194,19 @@ def _get_config():
     }
 
 
+def _extract_ffmpeg_error(stderr: str) -> str:
+    """Extract meaningful error from ffmpeg stderr, skipping version header."""
+    lines = stderr.splitlines()
+    # Look for actual error messages
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if any(k in low for k in ("error", "invalid", "unknown", "cannot", "failed", "unable")):
+            return "\n".join(lines[i:i+3])
+    # Return last non-empty lines if no error keyword found
+    non_empty = [l for l in lines if l.strip() and not l.strip().startswith("  ")]
+    return "\n".join(non_empty[-5:]) if non_empty else stderr[:200]
+
+
 def extract_audio_to_mp3(file_bytes: bytes, source_ext: str) -> bytes:
     """Convert any audio/video to a compact mono MP3 using ffmpeg."""
     src_path = None
@@ -205,8 +228,9 @@ def extract_audio_to_mp3(file_bytes: bytes, source_ext: str) -> bytes:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
-            logger.error("ffmpeg failed: %s", result.stderr[:500])
-            raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr[:200]}")
+            err = _extract_ffmpeg_error(result.stderr)
+            logger.error("ffmpeg failed: %s", err)
+            raise RuntimeError(f"ffmpeg audio extraction failed: {err}")
 
         with open(out_path, "rb") as f:
             mp3_bytes = f.read()
@@ -245,17 +269,22 @@ def _slice_audio_to_segments(mp3_bytes: bytes, segment_seconds: float, overlap_s
             duration = min(segment_seconds + overlap_seconds, total_duration - start)
             out_path = src_path + f"_seg_{start:.1f}.mp3"
 
+            # Use input seeking (-ss before -i) for faster processing, but add
+            # output seeking (-ss after -i) for accuracy if near the end
             cmd = [
-                "ffmpeg", "-y", "-i", src_path,
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-i", src_path,
                 "-vn", "-acodec", "libmp3lame",
                 "-ac", "1", "-ar", "16000", "-b:a", "64k",
-                "-ss", str(start), "-t", str(duration),
+                "-t", str(duration),
                 out_path,
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                logger.error("ffmpeg slice failed: %s", result.stderr[:500])
-                raise RuntimeError(f"ffmpeg slicing failed: {result.stderr[:200]}")
+                err = _extract_ffmpeg_error(result.stderr)
+                logger.error("ffmpeg slice failed at %.1fs: %s", start, err)
+                raise RuntimeError(f"ffmpeg slicing failed at {start:.1f}s: {err}")
 
             with open(out_path, "rb") as f:
                 seg_bytes = f.read()
@@ -264,6 +293,12 @@ def _slice_audio_to_segments(mp3_bytes: bytes, segment_seconds: float, overlap_s
                 os.unlink(out_path)
             except OSError:
                 pass
+
+            # Skip empty segments (can happen when -ss lands exactly at EOF)
+            if len(seg_bytes) < 1024:
+                logger.warning("Segment at %.1fs is empty (%d bytes), skipping", start, len(seg_bytes))
+                start += stride
+                continue
 
             segments.append((seg_bytes, start))
             start += stride
@@ -457,28 +492,39 @@ async def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, 
                 segment_texts.append(res["text"])
             logger.info("Segment %d: text_len=%d, words=%d", i, len(res.get("text", "")), len(res.get("words", [])))
 
+        # Always run VAD on the full audio for accurate speech/non-speech segments
+        speech_segments, non_speech_segments = detect_speech_segments(file_bytes)
+
         if all_words:
             merged_words = _merge_segment_words(all_words)
             text = "".join(w["text"] for w in merged_words)
             duration_ms = max((w["end_time"] for w in merged_words), default=int(real_duration * 1000))
             logger.info("Long audio ASR ok (words): %d segments -> %d words, %d ms", len(segments), len(merged_words), duration_ms)
-            return {
+            result = {
                 "text": text.strip(),
                 "words": merged_words,
                 "duration_ms": duration_ms,
             }
-
-        if segment_texts:
+        elif segment_texts:
             full_text = _merge_segment_texts(segment_texts, language)
             duration_ms = int(real_duration * 1000)
             logger.info("Long audio ASR ok (text only): %d segments -> text_len=%d", len(segments), len(full_text))
-            return {
+            result = {
                 "text": full_text,
                 "words": [],
                 "duration_ms": duration_ms,
             }
+        else:
+            raise RuntimeError("ASR returned no text/words for the long audio")
 
-        raise RuntimeError("ASR returned no text/words for the long audio")
+        # Attach VAD segments for both words and text-only paths
+        if speech_segments or non_speech_segments:
+            result["segments"] = {
+                "speech": speech_segments,
+                "non_speech": non_speech_segments,
+            }
+
+        return result
 
     # Short audio: also do VAD to get accurate speech segments
     speech_segments, non_speech_segments = detect_speech_segments(file_bytes)

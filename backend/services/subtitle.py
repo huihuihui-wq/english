@@ -13,14 +13,13 @@ _CJK_LANGS = {"zh", "ja"}
 
 def _sentence_end_pattern(language: str) -> str:
     if language in _CJK_LANGS:
-        # Include both full-width CJK terminators and western ones as fallback
         return r"[。！？.!?]+|\.\.\.+|…+"
     return r"[.!?]+|\.\.\.+"
 
 
 def _fallback_split_pattern(language: str) -> str:
     if language in _CJK_LANGS:
-        return r"(?<=[。！？.!?)\s*"
+        return r"(?<=[。！？.!?])\s*"
     return r"(?<=[.!?])\s+"
 
 
@@ -132,44 +131,63 @@ def _split_text_to_sentences(text: str, language: str = "en") -> List[str]:
 
 
 def _estimate_speech_duration(text: str, language: str = "en") -> int:
-    """Estimate how long it takes to speak this text, in milliseconds.
-
-    Based on average speaking rates:
-    - English: ~13 chars/second
-    - Chinese/Japanese: ~4 chars/second
-    """
+    """Estimate how long it takes to speak this text, in milliseconds."""
     if not text:
         return 0
     if language in ("zh", "ja", "ko"):
-        return int(len(text) * 250)  # 250ms per CJK character
-    return int(len(text) * 77)  # ~77ms per Latin character (~13 chars/sec)
+        return int(len(text) * 250)
+    return int(len(text) * 77)
 
 
-def _find_best_segment_for_sentence(sentence: str, speech_segments: list[dict], used_chars: list[int]) -> int:
-    """Find the speech segment that best fits this sentence.
+def _merge_intervals(intervals: list[dict]) -> list[dict]:
+    """Merge overlapping or adjacent intervals."""
+    if not intervals:
+        return []
+    sorted_intervals = sorted(intervals, key=lambda x: x["start"])
+    merged = [sorted_intervals[0].copy()]
+    for current in sorted_intervals[1:]:
+        last = merged[-1]
+        if current["start"] <= last["end"]:
+            last["end"] = max(last["end"], current["end"])
+        else:
+            merged.append(current.copy())
+    return merged
 
-    Prefers segments with fewer allocated sentences and similar duration/char ratio.
-    """
-    if not speech_segments:
-        return -1
 
-    best_idx = 0
-    best_score = -1
+def _subtract_intervals(total: list[dict], to_remove: list[dict]) -> list[dict]:
+    """Remove 'to_remove' intervals from 'total' intervals."""
+    if not to_remove:
+        return [seg.copy() for seg in total]
 
-    for i, seg in enumerate(speech_segments):
-        seg_dur = seg["end_ms"] - seg["start_ms"]
-        if seg_dur <= 0:
-            continue
+    result = []
+    remove_idx = 0
 
-        # Prefer segments with less allocated content
-        usage_ratio = used_chars[i] / max(1, seg_dur)
-        score = 1.0 / (usage_ratio + 0.1)
+    for seg in total:
+        seg_start = seg["start"]
+        seg_end = seg["end"]
+        cursor = seg_start
 
-        if score > best_score:
-            best_score = score
-            best_idx = i
+        while remove_idx < len(to_remove) and to_remove[remove_idx]["end"] <= seg_start:
+            remove_idx += 1
 
-    return best_idx
+        while cursor < seg_end and remove_idx < len(to_remove):
+            rem = to_remove[remove_idx]
+            if rem["start"] >= seg_end:
+                break
+
+            if rem["start"] > cursor:
+                result.append({"start": cursor, "end": min(rem["start"], seg_end)})
+
+            cursor = max(cursor, rem["end"])
+            if rem["end"] <= seg_end:
+                remove_idx += 1
+            else:
+                break
+
+        if cursor < seg_end:
+            result.append({"start": cursor, "end": seg_end})
+
+    return result
 
 
 def build_subtitles_from_speech_segments(
@@ -181,11 +199,12 @@ def build_subtitles_from_speech_segments(
 ) -> List[dict]:
     """Build subtitle items by mapping sentences to detected speech segments.
 
-    Non-speech segments longer than the threshold become placeholder subtitles.
-    Speech segments with significant internal gaps (applause, long pauses)
-    are truncated to estimated speech duration to avoid mixing subtitles with gaps.
-
-    Returns [{start, end, en, dur, is_placeholder?}, ...] in milliseconds.
+    Strategy:
+    1. Merge speech segments and subtract known non-speech placeholders.
+    2. Estimate total speech duration from text length.
+    3. If VAD over-detected speech (e.g. background music), truncate usable time
+       and add internal gap placeholders.
+    4. Distribute sentences proportionally across all usable windows.
     """
     sentences = _split_text_to_sentences(text, language)
     if not sentences and not speech_segments and not non_speech_segments:
@@ -194,124 +213,103 @@ def build_subtitles_from_speech_segments(
     items = []
     placeholder_min_ms = 1500
 
-    # Strategy: assign whole sentences to the best-fitting speech segment
-    used_chars = [0] * len(speech_segments)
-    segment_sentences = [[] for _ in speech_segments]
+    # Merge all speech segments
+    merged_speech = _merge_intervals([{"start": s["start_ms"], "end": s["end_ms"]} for s in speech_segments])
 
-    for sentence in sentences:
-        seg_idx = _find_best_segment_for_sentence(sentence, speech_segments, used_chars)
-        if seg_idx >= 0:
-            segment_sentences[seg_idx].append(sentence)
-            used_chars[seg_idx] += len(sentence)
-        else:
-            if segment_sentences:
-                segment_sentences[-1].append(sentence)
-                used_chars[-1] += len(sentence)
+    # Merge non-speech segments
+    merged_non_speech = _merge_intervals([{"start": s["start_ms"], "end": s["end_ms"]} for s in non_speech_segments])
+    valid_non_speech = [s for s in merged_non_speech if s["end"] - s["start"] >= placeholder_min_ms]
 
-    # Build subtitle items from each segment's assigned sentences
-    for i, seg in enumerate(speech_segments):
-        seg_sentences = segment_sentences[i]
-        if not seg_sentences:
-            continue
+    # Usable windows = speech minus known non-speech
+    usable_windows = _subtract_intervals(merged_speech, valid_non_speech)
+    total_usable = sum(w["end"] - w["start"] for w in usable_windows)
 
-        seg_dur = seg["end_ms"] - seg["start_ms"]
-        if seg_dur <= 0:
-            continue
+    total_text = "".join(sentences)
+    estimated_ms = _estimate_speech_duration(total_text, language)
 
-        # Estimate actual speech time for these sentences
-        total_text = "".join(seg_sentences)
-        estimated_ms = _estimate_speech_duration(total_text, language)
+    logger.info("Speech build: %d windows, usable=%dms, text_est=%dms",
+                len(usable_windows), total_usable, estimated_ms)
 
-        # If the segment is much longer than estimated speech time,
-        # there are internal gaps (applause, music, long pauses).
-        # We truncate the usable time and leave the rest as placeholder.
-        SPEECH_RATIO_THRESHOLD = 0.65  # If estimated < 65% of segment, there are gaps
-        MAX_SPEECH_STRETCH = 1.3  # Allow up to 30% breathing room
+    # Detect internal gaps: if usable time is much longer than estimated speech
+    SPEECH_RATIO_THRESHOLD = 0.55
+    MAX_STRETCH = 1.25
 
-        if estimated_ms > 0 and estimated_ms < seg_dur * SPEECH_RATIO_THRESHOLD:
-            # Truncate: only use estimated time * stretch factor
-            usable_dur = min(int(estimated_ms * MAX_SPEECH_STRETCH), seg_dur)
-            internal_gap = seg_dur - usable_dur
-            logger.info("Segment %d: truncating %dms -> %dms (est=%dms, gap=%dms)",
-                        i, seg_dur, usable_dur, estimated_ms, internal_gap)
-        else:
-            usable_dur = seg_dur
-            internal_gap = 0
+    if estimated_ms > 0 and total_usable > 0 and estimated_ms < total_usable * SPEECH_RATIO_THRESHOLD:
+        target_usable = min(int(estimated_ms * MAX_STRETCH), total_usable)
+        has_gaps = True
+        logger.info("Truncating: %dms -> %dms (gap=%dms)", total_usable, target_usable, total_usable - target_usable)
+    else:
+        target_usable = total_usable
+        has_gaps = False
 
-        # Distribute sentences proportionally within usable time
-        seg_text_chars = max(1, sum(len(s) for s in seg_sentences))
-        cursor = seg["start_ms"]
-        end_limit = seg["start_ms"] + usable_dur
+    # Add placeholders for VAD-detected non-speech
+    for ns in valid_non_speech:
+        items.append({
+            "start": ns["start"],
+            "end": ns["end"],
+            "en": placeholder_label,
+            "dur": ns["end"] - ns["start"],
+            "is_placeholder": True,
+        })
 
-        for s in seg_sentences:
-            s_dur = usable_dur * (len(s) / seg_text_chars)
-            s_dur = max(s_dur, 800)  # Minimum 0.8 second per sentence
-            s_end = min(int(cursor + s_dur), end_limit)
+    # Distribute sentences across usable windows
+    if sentences and usable_windows and target_usable > 0:
+        seg_text_chars = max(1, sum(len(s) for s in sentences))
+        total_allocated = 0
+        sent_idx = 0
 
-            items.append({
-                "start": int(cursor),
-                "end": s_end,
-                "en": s,
-                "dur": s_end - int(cursor),
-            })
-            cursor = s_end
+        for window in usable_windows:
+            window_dur = window["end"] - window["start"]
+            # How much of target_usable does this window get?
+            window_share = target_usable * (window_dur / total_usable) if total_usable > 0 else 0
+            window_limit = window["start"] + min(window_share, window_dur)
+            cursor = window["start"]
 
-        # Add internal gap placeholder if there is unused time in this segment
-        if internal_gap >= placeholder_min_ms:
-            items.append({
-                "start": int(end_limit),
-                "end": seg["end_ms"],
-                "en": placeholder_label,
-                "dur": internal_gap,
-                "is_placeholder": True,
-            })
+            while sent_idx < len(sentences) and cursor < window_limit:
+                s = sentences[sent_idx]
+                s_dur = target_usable * (len(s) / seg_text_chars)
+                s_dur = max(s_dur, 800)
+                s_end = min(int(cursor + s_dur), int(window_limit))
 
-    # Handle any leftover sentences that weren't assigned
-    unassigned = []
-    for seg_list in segment_sentences[len(speech_segments):]:
-        unassigned.extend(seg_list)
+                if s_end <= cursor:
+                    break
 
-    for sentence in unassigned:
-        if items:
-            last_end = items[-1]["end"]
-            items.append({
-                "start": last_end,
-                "end": last_end + 2000,
-                "en": sentence,
-                "dur": 2000,
-            })
-        else:
-            items.append({
-                "start": 0,
-                "end": 2000,
-                "en": sentence,
-                "dur": 2000,
-            })
+                items.append({
+                    "start": int(cursor),
+                    "end": s_end,
+                    "en": s,
+                    "dur": s_end - int(cursor),
+                })
+                total_allocated += (s_end - cursor)
+                cursor = s_end
+                sent_idx += 1
 
-    # Placeholder entries for music / long silence from VAD
-    for ns in non_speech_segments:
-        ns_dur = ns["end_ms"] - ns["start_ms"]
-        if ns_dur >= placeholder_min_ms:
-            items.append({
-                "start": ns["start_ms"],
-                "end": ns["end_ms"],
-                "en": placeholder_label,
-                "dur": ns_dur,
-                "is_placeholder": True,
-            })
+        # Add placeholder for unused usable time
+        if has_gaps and total_allocated < target_usable:
+            last_window = usable_windows[-1]
+            unused_start = last_window["start"] + min(target_usable * (last_window["end"] - last_window["start"]) / total_usable, last_window["end"] - last_window["start"])
+            unused_start = int(unused_start)
+            if unused_start < last_window["end"]:
+                gap_dur = last_window["end"] - unused_start
+                if gap_dur >= placeholder_min_ms:
+                    items.append({
+                        "start": unused_start,
+                        "end": last_window["end"],
+                        "en": placeholder_label,
+                        "dur": gap_dur,
+                        "is_placeholder": True,
+                    })
 
     items.sort(key=lambda x: x["start"])
 
-    # Post-process: merge consecutive placeholders to avoid flickering
+    # Merge consecutive placeholders
     merged_items = []
     for it in items:
         if it.get("is_placeholder") and merged_items and merged_items[-1].get("is_placeholder"):
-            # Merge with previous placeholder
             merged_items[-1]["end"] = it["end"]
             merged_items[-1]["dur"] = it["end"] - merged_items[-1]["start"]
         else:
             merged_items.append(it)
 
-    logger.info("VAD-based split: %d speech segs, %d non-speech segs -> %d items (%s)",
-                len(speech_segments), len(non_speech_segments), len(merged_items), language)
+    logger.info("VAD-based split: %d items (%s)", len(merged_items), language)
     return merged_items

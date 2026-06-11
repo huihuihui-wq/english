@@ -2,21 +2,22 @@
 
 Single file: backend/data/vocabulary.json
 
-Schema:
+Schema (v2):
 {
-  "version": 1,
+  "version": 2,
   "words": [
     {
       "word": "ephemeral",
       "lemma": "ephemeral",
       "phonetic": "/ɪˈfem.ər.əl/",
       "pos": "adjective",
-      "meaning_zh": "短暂的；瞬息的",
       "meaning_en": "lasting for a very short time",
-      "example": {"en": "...", "zh": "..."} | null,
+      "meaning_native": "短暂的；瞬息的",
+      "native_lang": "zh",
+      "example": {"en": "...", "native": "..."} | null,
       "source_history_id": "abc123" | null,
-      "added_at": "2025-01-01T00:00:00Z",
-      "updated_at": "2025-01-01T00:00:00Z"
+      "added_at": "...",
+      "updated_at": "..."
     }
   ]
 }
@@ -39,9 +40,29 @@ VOCAB_FILE = DATA_DIR / "vocabulary.json"
 _lock = threading.RLock()
 _cache: Optional[dict] = None
 
+SCHEMA_VERSION = 2
+DEFAULT_NATIVE_LANG = "en"
+
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _migrate(record: dict) -> dict:
+    """Migrate a v1 record (meaning_zh) to v2 (meaning_native + native_lang)."""
+    if "meaning_native" in record or "native_lang" in record:
+        return record
+    out = dict(record)
+    zh = out.pop("meaning_zh", "") or ""
+    out["meaning_native"] = zh
+    out["native_lang"] = "zh"
+    example = out.get("example")
+    if isinstance(example, dict):
+        ex2 = dict(example)
+        if "zh" in ex2 and "native" not in ex2:
+            ex2["native"] = ex2.pop("zh")
+        out["example"] = ex2
+    return out
 
 
 def _ensure_file() -> None:
@@ -55,13 +76,18 @@ def _ensure_file() -> None:
                 _cache = json.loads(VOCAB_FILE.read_text(encoding="utf-8-sig"))
             except Exception as e:
                 logger.warning("[vocab] Failed to parse vocabulary.json: %s", e)
-                _cache = {"version": 1, "words": []}
+                _cache = {"version": SCHEMA_VERSION, "words": []}
         else:
-            _cache = {"version": 1, "words": []}
+            _cache = {"version": SCHEMA_VERSION, "words": []}
         if "version" not in _cache:
-            _cache["version"] = 1
+            _cache["version"] = SCHEMA_VERSION
         if "words" not in _cache or not isinstance(_cache["words"], list):
             _cache["words"] = []
+        else:
+            # Migrate records in place
+            for i, w in enumerate(_cache["words"]):
+                if isinstance(w, dict):
+                    _cache["words"][i] = _migrate(w)
 
 
 def _flush() -> None:
@@ -79,7 +105,7 @@ def _flush() -> None:
 def list_words() -> list[dict]:
     with _lock:
         _ensure_file()
-        items = list(_cache["words"])
+        items = [dict(w) for w in _cache["words"]]
     items.sort(key=lambda w: (w.get("added_at") or ""), reverse=True)
     return items
 
@@ -114,12 +140,15 @@ def add_word(entry: dict) -> dict:
     if not word:
         raise ValueError("word is required")
 
+    native_lang = (entry.get("native_lang") or DEFAULT_NATIVE_LANG).strip().lower() or DEFAULT_NATIVE_LANG
     now = _now_iso()
     with _lock:
         _ensure_file()
         for existing in _cache["words"]:
             if (existing.get("word") or "").strip().lower() == word.lower():
-                for k in ("lemma", "phonetic", "pos", "meaning_zh", "meaning_en", "example", "source_history_id"):
+                for k in ("lemma", "phonetic", "pos", "meaning_en",
+                          "meaning_native", "native_lang", "example",
+                          "source_history_id"):
                     if k in entry and entry[k] is not None:
                         existing[k] = entry[k]
                 existing["updated_at"] = now
@@ -131,8 +160,9 @@ def add_word(entry: dict) -> dict:
             "lemma": (entry.get("lemma") or word).lower(),
             "phonetic": entry.get("phonetic") or "",
             "pos": entry.get("pos") or "",
-            "meaning_zh": entry.get("meaning_zh") or "",
             "meaning_en": entry.get("meaning_en") or "",
+            "meaning_native": entry.get("meaning_native") or "",
+            "native_lang": native_lang,
             "example": entry.get("example") or None,
             "source_history_id": entry.get("source_history_id") or None,
             "added_at": now,

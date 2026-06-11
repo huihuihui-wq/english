@@ -136,8 +136,9 @@ class VocabularyAddRequest(BaseModel):
     lemma: Optional[str] = None
     phonetic: Optional[str] = ""
     pos: Optional[str] = ""
-    meaning_zh: Optional[str] = ""
     meaning_en: Optional[str] = ""
+    meaning_native: Optional[str] = ""
+    native_lang: Optional[str] = "en"
     example: Optional[dict] = None
     source_history_id: Optional[str] = None
 
@@ -227,7 +228,8 @@ async def update_config(req: ConfigUpdateRequest):
             app_config.set_setting("DASHSCOPE_API_KEY", api_key, persist=True)
             action = "saved"
     if req.DICT_LANG is not None:
-        app_config.set_setting("DICT_LANG", req.DICT_LANG.strip() or "Chinese", persist=True)
+        normalized = dict_service.normalize_target_lang(req.DICT_LANG)
+        app_config.set_setting("DICT_LANG", normalized, persist=True)
         if action == "none":
             action = "saved"
     if action == "none":
@@ -869,16 +871,17 @@ async def tts_voices(language_type: str = "English"):
 # Word lookup & vocabulary
 # ---------------------------------------------------------------------------
 @app.get("/api/word/lookup")
-async def word_lookup(word: str, force_refresh: bool = False):
+async def word_lookup(word: str, lang: Optional[str] = None, force_refresh: bool = False):
     if not word or not word.strip():
         raise HTTPException(400, "word is required")
     if not is_english_word(word):
         raise HTTPException(400, f"unsupported token: {word!r}")
     target = normalize_for_lookup(word)
+    target_lang = dict_service.normalize_target_lang(lang) if lang else None
     try:
         if force_refresh:
             dict_service.invalidate(target)
-        entry = await dict_service.lookup_word(target)
+        entry = await dict_service.lookup_word(target, target_lang=target_lang)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except LookupError as e:
@@ -889,6 +892,14 @@ async def word_lookup(word: str, force_refresh: bool = False):
     if "lemma" not in entry or not entry.get("lemma"):
         entry["lemma"] = lemma(target)
     return {**entry, "saved": vocab_service.has_word(target)}
+
+
+@app.get("/api/word/languages")
+async def word_languages():
+    return {
+        "languages": dict_service.SUPPORTED_DICT_LANGS,
+        "default": app_config.get_setting("DICT_LANG", dict_service.DEFAULT_DICT_LANG),
+    }
 
 
 @app.get("/api/word/tts")
@@ -927,14 +938,16 @@ async def vocabulary_add(req: VocabularyAddRequest):
         raise HTTPException(400, "word is required")
     if not is_english_word(word):
         raise HTTPException(400, f"unsupported token: {word!r}")
+    native_lang = dict_service.normalize_target_lang(req.native_lang)
     try:
         record = vocab_service.add_word({
             "word": word,
             "lemma": req.lemma or lemma(word),
             "phonetic": req.phonetic or "",
             "pos": req.pos or "",
-            "meaning_zh": req.meaning_zh or "",
             "meaning_en": req.meaning_en or "",
+            "meaning_native": req.meaning_native or "",
+            "native_lang": native_lang,
             "example": req.example,
             "source_history_id": req.source_history_id,
         })

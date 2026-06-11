@@ -1,0 +1,19 @@
+{
+  "word": "smoketest_xyz",
+  "lemma": "smoketest_xyz",
+  "phonetic": "",
+  "pos": "",
+  "meaning_zh": "烟雾测试（软件开发中快速验证基本功能的初步测试）",
+  "meaning_en": "A preliminary test in software development to check if the most critical functions of a program work after a build, before proceeding to more detailed testing.",
+  "examples": [
+    {
+      "en": "The team ran a smoke test immediately after deploying the new version to ensure core features were operational.",
+      "zh": "团队在部署新版本后立即运行烟雾测试，以确保核心功能正常运行。"
+    },
+    {
+      "en": "If the smoke test fails, the build is rejected and sent back to developers for fixes.",
+      "zh": "如果烟雾测试失败，该构建将被拒绝并退回给开发人员修复。"
+    }
+  ],
+  "source": "llm:qwen-plus"
+}
