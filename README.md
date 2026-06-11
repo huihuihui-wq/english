@@ -100,6 +100,6 @@ MIT
 ## Notes
 
 - **Audio duration limit**: `qwen3-asr-flash` has a model-level audio length limit. The default backend guard is **120 seconds (2 minutes)**. Longer uploads are automatically sliced into overlapping segments, transcribed in parallel, and merged with offset timestamps. If slicing still fails, trim the clip or increase `MAX_ASR_AUDIO_SECONDS` in `backend/.env` if your DashScope account supports longer audio.
-- **Timing accuracy for long audio**: When ASR does not return word-level timestamps, the backend uses ffmpeg `silencedetect` to find real speech/non-speech regions and maps subtitles to actual voice segments. Non-speech segments (intro music, long pauses) are shown as `...` placeholder subtitles so the timeline stays aligned with the audio.
+- **Timing accuracy**: The backend uses ffmpeg `silencedetect` (noise threshold -45dB, min silence 1.0s) to distinguish speech from non-speech. Short noise bursts like applause or coughs (< 0.3s) are filtered out. Speech segments with gaps < 1.5s are merged to keep conversation continuous. Non-speech segments (intro music, long pauses) are shown as `...` placeholder subtitles so the timeline stays aligned with the audio.
 - Timestamps are estimated from ASR word timings and punctuation. They are good enough for shadowing but may drift 1–3 seconds from exact speech boundaries.
 - Free DashScope quotas vary by account and promotion. The in-app quota widget is a local estimate; verify your actual balance in the DashScope console.

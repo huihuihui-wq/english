@@ -4,7 +4,6 @@ import base64
 import io
 import logging
 import os
-import re
 import subprocess
 import tempfile
 import wave
@@ -72,8 +71,14 @@ def _get_real_audio_duration_bytes(file_bytes: bytes) -> float:
     return _get_audio_duration_seconds(file_bytes)
 
 
-def detect_speech_segments(file_bytes: bytes, noise_db: int = -40, min_silence_duration: float = 0.5) -> tuple[list[dict], list[dict]]:
+def detect_speech_segments(file_bytes: bytes, noise_db: int = -45, min_silence_duration: float = 1.0) -> tuple[list[dict], list[dict]]:
     """Use ffmpeg silencedetect to find speech and non-speech segments.
+
+    Optimized parameters:
+    - noise_db: -45dB (more sensitive than -40dB, catches quieter gaps)
+    - min_silence_duration: 1.0s (avoids fragmenting on short pauses)
+    - Filters out speech segments < 0.3s (applause, coughs)
+    - Merges speech segments with gaps < 1.5s (keeps conversation continuous)
 
     Returns (speech_segments, non_speech_segments) with start_ms / end_ms.
     """
@@ -108,25 +113,58 @@ def detect_speech_segments(file_bytes: bytes, noise_db: int = -40, min_silence_d
 
         duration = _get_real_audio_duration_bytes(file_bytes)
 
-        speech = []
-        non_speech = []
+        # Build raw speech segments from silence boundaries
+        raw_speech = []
+        raw_non_speech = []
         cursor = 0.0
         for i, start in enumerate(silence_starts):
             end = silence_ends[i] if i < len(silence_ends) else None
             if start > cursor:
-                speech.append({"start_ms": int(cursor * 1000), "end_ms": int(start * 1000)})
+                raw_speech.append({"start_ms": int(cursor * 1000), "end_ms": int(start * 1000)})
             if end is not None:
-                non_speech.append({"start_ms": int(start * 1000), "end_ms": int(end * 1000)})
+                raw_non_speech.append({"start_ms": int(start * 1000), "end_ms": int(end * 1000)})
                 cursor = end
             else:
-                non_speech.append({"start_ms": int(start * 1000), "end_ms": int(duration * 1000)})
+                raw_non_speech.append({"start_ms": int(start * 1000), "end_ms": int(duration * 1000)})
                 cursor = duration
                 break
 
         if cursor < duration:
-            speech.append({"start_ms": int(cursor * 1000), "end_ms": int(duration * 1000)})
+            raw_speech.append({"start_ms": int(cursor * 1000), "end_ms": int(duration * 1000)})
 
-        return speech, non_speech
+        # Filter: remove very short speech segments (applause, noise)
+        MIN_SPEECH_MS = 300
+        filtered_speech = [s for s in raw_speech if s["end_ms"] - s["start_ms"] >= MIN_SPEECH_MS]
+
+        # Merge: combine speech segments with small gaps (< 1.5s)
+        GAP_THRESHOLD_MS = 1500
+        merged_speech = []
+        for seg in filtered_speech:
+            if not merged_speech:
+                merged_speech.append(seg)
+            else:
+                last = merged_speech[-1]
+                gap = seg["start_ms"] - last["end_ms"]
+                if gap <= GAP_THRESHOLD_MS:
+                    # Merge: extend the last segment
+                    last["end_ms"] = seg["end_ms"]
+                else:
+                    merged_speech.append(seg)
+
+        # Rebuild non-speech segments from merged speech
+        merged_non_speech = []
+        cursor_ms = 0
+        for seg in merged_speech:
+            if seg["start_ms"] > cursor_ms:
+                merged_non_speech.append({"start_ms": cursor_ms, "end_ms": seg["start_ms"]})
+            cursor_ms = seg["end_ms"]
+        if cursor_ms < int(duration * 1000):
+            merged_non_speech.append({"start_ms": cursor_ms, "end_ms": int(duration * 1000)})
+
+        logger.info("VAD: %d raw speech -> %d merged speech, %d non-speech (dur=%.1fs)",
+                    len(filtered_speech), len(merged_speech), len(merged_non_speech), duration)
+
+        return merged_speech, merged_non_speech
     except Exception as e:
         logger.warning("VAD detection failed: %s", e)
         return [], []
@@ -419,8 +457,6 @@ async def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, 
                 segment_texts.append(res["text"])
             logger.info("Segment %d: text_len=%d, words=%d", i, len(res.get("text", "")), len(res.get("words", [])))
 
-        speech_segments, non_speech_segments = detect_speech_segments(file_bytes)
-
         if all_words:
             merged_words = _merge_segment_words(all_words)
             text = "".join(w["text"] for w in merged_words)
@@ -430,7 +466,6 @@ async def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, 
                 "text": text.strip(),
                 "words": merged_words,
                 "duration_ms": duration_ms,
-                "segments": {"speech": speech_segments, "non_speech": non_speech_segments},
             }
 
         if segment_texts:
@@ -441,13 +476,22 @@ async def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, 
                 "text": full_text,
                 "words": [],
                 "duration_ms": duration_ms,
-                "segments": {"speech": speech_segments, "non_speech": non_speech_segments},
             }
 
         raise RuntimeError("ASR returned no text/words for the long audio")
 
+    # Short audio: also do VAD to get accurate speech segments
+    speech_segments, non_speech_segments = detect_speech_segments(file_bytes)
     asr_result = await _call_asr_api(file_bytes, language, cfg)
     logger.info("ASR ok: %d words, %d ms", len(asr_result.get("words", [])), asr_result.get("duration_ms", 0))
+
+    # Attach VAD segments if available
+    if speech_segments or non_speech_segments:
+        asr_result["segments"] = {
+            "speech": speech_segments,
+            "non_speech": non_speech_segments,
+        }
+
     return asr_result
 
 

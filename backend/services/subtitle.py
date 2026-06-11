@@ -14,13 +14,13 @@ _CJK_LANGS = {"zh", "ja"}
 def _sentence_end_pattern(language: str) -> str:
     if language in _CJK_LANGS:
         # Include both full-width CJK terminators and western ones as fallback
-        return r"[。！？.!?]+|\.{3,}|…+"
-    return r"[.!?]+|\.{3,}"
+        return r"[。！？.!?]+|\.\.\.+|…+"
+    return r"[.!?]+|\.\.\.+"
 
 
 def _fallback_split_pattern(language: str) -> str:
     if language in _CJK_LANGS:
-        return r"(?<=[。！？.!?])\s+"
+        return r"(?<=[。！？.!?])\s*"
     return r"(?<=[.!?])\s+"
 
 
@@ -131,6 +131,33 @@ def _split_text_to_sentences(text: str, language: str = "en") -> List[str]:
     return [p.strip().replace("<DOT>", ".") for p in parts if p.strip()]
 
 
+def _find_best_segment_for_sentence(sentence: str, speech_segments: list[dict], used_chars: list[int]) -> int:
+    """Find the speech segment that best fits this sentence.
+
+    Prefers segments with fewer allocated sentences and similar duration/char ratio.
+    """
+    if not speech_segments:
+        return -1
+
+    best_idx = 0
+    best_score = -1
+
+    for i, seg in enumerate(speech_segments):
+        seg_dur = seg["end_ms"] - seg["start_ms"]
+        if seg_dur <= 0:
+            continue
+
+        # Prefer segments with less allocated content
+        usage_ratio = used_chars[i] / max(1, seg_dur)
+        score = 1.0 / (usage_ratio + 0.1)
+
+        if score > best_score:
+            best_score = score
+            best_idx = i
+
+    return best_idx
+
+
 def build_subtitles_from_speech_segments(
     text: str,
     speech_segments: list[dict],
@@ -148,63 +175,67 @@ def build_subtitles_from_speech_segments(
         return []
 
     items = []
-    placeholder_min_ms = 1500
+    placeholder_min_ms = 2000  # Increased from 1500 to avoid fragmenting on short pauses
 
-    total_speech_duration = max(1, sum(seg["end_ms"] - seg["start_ms"] for seg in speech_segments))
-    total_text_chars = max(1, sum(len(s) for s in sentences))
+    # Strategy: assign whole sentences to the best-fitting speech segment
+    # Track how much text we've assigned to each segment
+    used_chars = [0] * len(speech_segments)
+    segment_sentences = [[] for _ in speech_segments]
 
-    sent_idx = 0
-    for seg in speech_segments:
-        seg_dur = seg["end_ms"] - seg["start_ms"]
-        if seg_dur <= 0:
-            continue
+    for sentence in sentences:
+        seg_idx = _find_best_segment_for_sentence(sentence, speech_segments, used_chars)
+        if seg_idx >= 0:
+            segment_sentences[seg_idx].append(sentence)
+            used_chars[seg_idx] += len(sentence)
+        else:
+            # No speech segments, append to last or create new
+            if segment_sentences:
+                segment_sentences[-1].append(sentence)
+                used_chars[-1] += len(sentence)
 
-        # Allocate sentences roughly proportional to this segment's share of speech time.
-        target_chars = total_text_chars * (seg_dur / total_speech_duration)
-        seg_sentences = []
-        chars_allocated = 0
-        while sent_idx < len(sentences):
-            s = sentences[sent_idx]
-            if not seg_sentences or chars_allocated + len(s) <= target_chars + len(s) * 0.6:
-                seg_sentences.append(s)
-                chars_allocated += len(s)
-                sent_idx += 1
-            else:
-                break
-
+    # Build subtitle items from each segment's assigned sentences
+    for i, seg in enumerate(speech_segments):
+        seg_sentences = segment_sentences[i]
         if not seg_sentences:
             continue
 
+        seg_dur = seg["end_ms"] - seg["start_ms"]
         seg_text_chars = max(1, sum(len(s) for s in seg_sentences))
         cursor = seg["start_ms"]
+
         for s in seg_sentences:
+            # Distribute time proportionally by character count within this segment
             s_dur = seg_dur * (len(s) / seg_text_chars)
+            s_dur = max(s_dur, 1000)  # Minimum 1 second per sentence
             items.append({
                 "start": int(cursor),
-                "end": int(cursor + s_dur),
+                "end": int(min(cursor + s_dur, seg["end_ms"])),
                 "en": s,
                 "dur": int(s_dur),
             })
             cursor += s_dur
 
-    # Append any leftover sentences to the last speech segment or at the end.
-    while sent_idx < len(sentences):
+    # Handle any leftover sentences that weren't assigned
+    unassigned = []
+    for seg_list in segment_sentences[len(speech_segments):]:
+        unassigned.extend(seg_list)
+
+    for sentence in unassigned:
         if items:
             last_end = items[-1]["end"]
             items.append({
                 "start": last_end,
                 "end": last_end + 2000,
-                "en": sentences[sent_idx],
+                "en": sentence,
                 "dur": 2000,
             })
         else:
             items.append({
                 "start": 0,
                 "end": 2000,
-                "en": sentences[sent_idx],
+                "en": sentence,
                 "dur": 2000,
             })
-        sent_idx += 1
 
     # Placeholder entries for music / long silence.
     for ns in non_speech_segments:
