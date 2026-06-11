@@ -253,9 +253,9 @@ def build_subtitles_from_speech_segments(
         })
 
     # Distribute sentences across usable windows
+    last_subtitle_end = 0
     if sentences and usable_windows and target_usable > 0:
         seg_text_chars = max(1, sum(len(s) for s in sentences))
-        total_allocated = 0
         sent_idx = 0
 
         for window in usable_windows:
@@ -280,25 +280,44 @@ def build_subtitles_from_speech_segments(
                     "en": s,
                     "dur": s_end - int(cursor),
                 })
-                total_allocated += (s_end - cursor)
+                last_subtitle_end = s_end
                 cursor = s_end
                 sent_idx += 1
 
-        # Add placeholder for unused usable time
-        if has_gaps and total_allocated < target_usable:
+        # Add placeholder for internal gap (music/applause within speech segment)
+        # This handles the case where VAD detects speech but it's actually background music
+        if has_gaps and last_subtitle_end > 0:
+            # Find the end of the last usable window that was used
             last_window = usable_windows[-1]
-            unused_start = last_window["start"] + min(target_usable * (last_window["end"] - last_window["start"]) / total_usable, last_window["end"] - last_window["start"])
-            unused_start = int(unused_start)
-            if unused_start < last_window["end"]:
-                gap_dur = last_window["end"] - unused_start
-                if gap_dur >= placeholder_min_ms:
-                    items.append({
-                        "start": unused_start,
-                        "end": last_window["end"],
-                        "en": placeholder_label,
-                        "dur": gap_dur,
-                        "is_placeholder": True,
-                    })
+            gap_start = last_subtitle_end
+            gap_end = last_window["end"]
+            
+            # Also add gaps between usable windows if they exist
+            for i in range(len(usable_windows) - 1):
+                if usable_windows[i]["end"] > last_subtitle_end:
+                    gap_start = max(gap_start, last_subtitle_end)
+                    gap_end = usable_windows[i]["end"]
+                    gap_dur = gap_end - gap_start
+                    if gap_dur >= placeholder_min_ms:
+                        items.append({
+                            "start": gap_start,
+                            "end": gap_end,
+                            "en": placeholder_label,
+                            "dur": gap_dur,
+                            "is_placeholder": True,
+                        })
+                    gap_start = usable_windows[i + 1]["start"]
+            
+            # Final gap from last subtitle to end of last window
+            gap_dur = gap_end - gap_start
+            if gap_dur >= placeholder_min_ms:
+                items.append({
+                    "start": gap_start,
+                    "end": gap_end,
+                    "en": placeholder_label,
+                    "dur": gap_dur,
+                    "is_placeholder": True,
+                })
 
     items.sort(key=lambda x: x["start"])
 
