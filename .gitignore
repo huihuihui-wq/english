@@ -16,6 +16,7 @@ backend/.venv/
 # User data and runtime state
 backend/data/settings.json
 backend/data/history/
+backend/data/dict_cache/
 backend/.tts_cache/
 
 # Logs
