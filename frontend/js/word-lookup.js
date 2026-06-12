@@ -187,6 +187,10 @@ const WordLookup = (() => {
     if (!isNativeEn && meaningEn) {
       parts.push(`<div class="wp-meaning wp-meaning-en">${escapeHtml(meaningEn)}</div>`);
     }
+    // Word root section
+    const rootBlock = renderRootBlock(entry, isNativeEn);
+    if (rootBlock) parts.push(rootBlock);
+    // Examples
     if (Array.isArray(entry.examples) && entry.examples.length) {
       const items = entry.examples
         .filter((e) => e && e.en)
@@ -201,6 +205,77 @@ const WordLookup = (() => {
       parts.push('<div class="wp-empty">No definition found.</div>');
     }
     elBody.innerHTML = parts.join("");
+
+    // Wire up clicks on family / related words
+    elBody.querySelectorAll("[data-lookup-word]").forEach((el) => {
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const w = el.dataset.lookupWord;
+        if (!w || !current) return;
+        // Re-open popover for the new word by simulating a fresh lookup
+        const fakeAnchor = document.createElement("span");
+        fakeAnchor.className = "word";
+        fakeAnchor.dataset.word = w;
+        fakeAnchor.textContent = w;
+        // Use the source sentence of the current entry as context
+        show(fakeAnchor, current.sourceSentence);
+      });
+    });
+  }
+
+  function renderRootBlock(entry, isNativeEn) {
+    const roots = entry.roots || {};
+    const family = Array.isArray(entry.family) ? entry.family : [];
+    const related = Array.isArray(entry.related) ? entry.related : [];
+    const etymologyEn = entry.etymology_en || "";
+    const etymologyNative = !isNativeEn ? (entry.etymology_native || "") : "";
+
+    const hasRoots = (roots.prefix || roots.root || roots.suffix);
+    const hasFamily = family.length > 0;
+    const hasRelated = related.length > 0;
+    const hasEtymology = etymologyEn || etymologyNative;
+
+    if (!hasRoots && !hasFamily && !hasRelated && !hasEtymology) return "";
+
+    const rootChips = [];
+    if (roots.prefix) rootChips.push(`<span class="wp-root-chip wp-root-prefix">${escapeHtml(roots.prefix)}</span>`);
+    if (roots.root) rootChips.push(`<span class="wp-root-chip wp-root-base">${escapeHtml(roots.root)}</span>`);
+    if (roots.suffix) rootChips.push(`<span class="wp-root-chip wp-root-suffix">${escapeHtml(roots.suffix)}</span>`);
+
+    const etymologyHtml = (() => {
+      if (!hasEtymology) return "";
+      const primary = !isNativeEn && etymologyNative ? etymologyNative : etymologyEn;
+      const secondary = !isNativeEn && etymologyNative && etymologyEn
+        ? `<div class="wp-ety-en">${escapeHtml(etymologyEn)}</div>`
+        : "";
+      return `<div class="wp-ety-primary">${escapeHtml(primary)}</div>${secondary}`;
+    })();
+
+    const familyHtml = hasFamily
+      ? `<div class="wp-family-row">${family
+          .map((w) => `<span class="wp-family-chip" data-lookup-word="${escapeHtml(w)}" title="Look up &quot;${escapeHtml(w)}&quot;">${escapeHtml(w)}</span>`)
+          .join("")}</div>`
+      : "";
+
+    const relatedHtml = hasRelated
+      ? `<ul class="wp-related-list">${related
+          .map((r) => {
+            const w = escapeHtml(r.word || "");
+            const pos = r.pos ? `<span class="wp-related-pos">${escapeHtml(r.pos)}</span>` : "";
+            const gloss = r.gloss_en ? `<span class="wp-related-gloss">${escapeHtml(r.gloss_en)}</span>` : "";
+            return `<li><span class="wp-related-word" data-lookup-word="${w}">${w}</span> ${pos} ${gloss}</li>`;
+          })
+          .join("")}</ul>`
+      : "";
+
+    return `
+      <div class="wp-roots-block">
+        <div class="wp-roots-header">🌱 Word Root</div>
+        ${hasRoots ? `<div class="wp-roots-chips">${rootChips.join("")}</div>` : ""}
+        ${etymologyHtml}
+        ${hasFamily ? `<div class="wp-family-label">词族</div>${familyHtml}` : ""}
+        ${hasRelated ? `<div class="wp-related-label">同根词</div>${relatedHtml}` : ""}
+      </div>`;
   }
 
   function renderError(msg) {
@@ -270,6 +345,11 @@ const WordLookup = (() => {
         native_lang: lang,
         example: exampleOut,
         source_history_id: window.History && window.History.currentId ? window.History.currentId : null,
+        roots: e.roots || null,
+        etymology_en: e.etymology_en || "",
+        etymology_native: e.etymology_native || "",
+        family: Array.isArray(e.family) ? e.family : [],
+        related: Array.isArray(e.related) ? e.related : [],
       };
       const resp = await fetch("/api/vocabulary", {
         method: "POST",

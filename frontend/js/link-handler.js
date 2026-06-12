@@ -5,6 +5,16 @@ const LinkHandler = (() => {
   let currentVideoUrl = '';
   let currentSubtitles = [];
 
+  // YouTube IFrame API state - we use postMessage polling because
+  // the local <video> element does NOT get timeupdate events when
+  // YouTube is playing inside its iframe.
+  let ytCurrentTime = 0;
+  let ytDuration = 0;
+  let ytIsPlaying = false;
+  let ytPollHandle = null;
+  let ytPostMessageListener = null;
+  let ytCommandQueue = [];
+
   function init() {
     document.querySelectorAll('.input-tab').forEach(tab => {
       tab.addEventListener('click', () => switchInputTab(tab.dataset.tab));
@@ -140,16 +150,153 @@ const LinkHandler = (() => {
     video.classList.add('hidden');
     youtubePlayer.classList.remove('hidden');
     youtubePlayer.innerHTML = '';
-    
+
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.title = 'YouTube video player';
-    
+
     youtubePlayer.appendChild(iframe);
     youtubeIframe = iframe;
-    console.log('[LinkHandler] YouTube video loaded:', videoId);
+
+    // Reset YouTube state
+    ytCurrentTime = 0;
+    ytDuration = 0;
+    ytIsPlaying = false;
+    ytCommandQueue = [];
+
+    // Set up postMessage listener for YouTube IFrame API responses
+    if (!ytPostMessageListener) {
+      ytPostMessageListener = (event) => {
+        // YouTube IFrame API sends messages prefixed with certain patterns.
+        // We extract numeric time/duration from the response.
+        if (typeof event.data !== 'string') return;
+        const data = event.data;
+        // Match patterns like "{\"event\":\"infoDelivery\",\"info\":{\"currentTime\":12.34}}"
+        // or "{\"event\":\"onStateChange\"...}"
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.event === 'infoDelivery' && parsed.info) {
+              if (typeof parsed.info.currentTime === 'number') {
+                ytCurrentTime = parsed.info.currentTime;
+              }
+              if (typeof parsed.info.duration === 'number') {
+                ytDuration = parsed.info.duration;
+              }
+            } else if (parsed.event === 'onStateChange') {
+              if (parsed.info === 1) ytIsPlaying = true;     // playing
+              else if (parsed.info === 2) ytIsPlaying = false; // paused
+              else if (parsed.info === 0) ytIsPlaying = false; // ended
+            }
+          }
+        } catch (e) {
+          // Not a YouTube API message - ignore.
+        }
+      };
+      window.addEventListener('message', ytPostMessageListener);
+    }
+
+    // Poll the IFrame every 250ms. We queue getCurrentTime, getDuration,
+    // and playerState commands; YouTube responds via postMessage.
+    if (ytPollHandle) clearInterval(ytPollHandle);
+    ytPollHandle = setInterval(() => {
+      if (!youtubeIframe || !youtubeIframe.contentWindow) return;
+      try {
+        // Send a fresh getCurrentTime every poll - YouTube replies asynchronously
+        // via the 'message' listener above.
+        youtubeIframe.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }),
+          '*'
+        );
+        // Throttle duration/state queries to once per ~1s
+        if (!ytPollHandle._tick) ytPollHandle._tick = 0;
+        ytPollHandle._tick++;
+        if (ytPollHandle._tick % 4 === 0) {
+          youtubeIframe.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'getDuration', args: [] }),
+            '*'
+          );
+          youtubeIframe.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }),
+            '*'
+          );
+        }
+      } catch (e) {
+        // Cross-origin or iframe not ready - skip.
+      }
+    }, 250);
+
+    console.log('[LinkHandler] YouTube video loaded with time polling:', videoId);
+  }
+
+  /**
+   * Send a command to the YouTube iframe. Returns a promise that resolves
+   * when the iframe acknowledges the command (not when the action completes).
+   */
+  function sendYouTubeCommand(command, args = []) {
+    if (!youtubeIframe || !youtubeIframe.contentWindow) return;
+    try {
+      youtubeIframe.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: command, args }),
+        '*'
+      );
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /**
+   * Get current playback time. For YouTube, returns the polled value
+   * (0 if not yet polled). For direct video, returns the local <video>.currentTime.
+   */
+  function getCurrentTime() {
+    if (youtubeIframe) {
+      return ytCurrentTime || 0;
+    }
+    return video ? (video.currentTime || 0) : 0;
+  }
+
+  function getDuration() {
+    if (youtubeIframe) {
+      return ytDuration || 0;
+    }
+    return video ? (video.duration || 0) : 0;
+  }
+
+  function isYouTubePlaying() {
+    if (youtubeIframe) {
+      return ytIsPlaying;
+    }
+    return video ? !video.paused : false;
+  }
+
+  function seekTo(seconds) {
+    if (youtubeIframe) {
+      sendYouTubeCommand('seekTo', [seconds, true]);
+      ytCurrentTime = seconds;  // optimistic update
+    } else if (video) {
+      video.currentTime = seconds;
+    }
+  }
+
+  function play() {
+    if (youtubeIframe) {
+      sendYouTubeCommand('playVideo');
+      ytIsPlaying = true;
+    } else if (video && video.paused) {
+      video.play();
+    }
+  }
+
+  function pause() {
+    if (youtubeIframe) {
+      sendYouTubeCommand('pauseVideo');
+      ytIsPlaying = false;
+    } else if (video && !video.paused) {
+      video.pause();
+    }
   }
 
   function loadDirectVideo(url) {
@@ -157,6 +304,14 @@ const LinkHandler = (() => {
     youtubePlayer.classList.add('hidden');
     youtubePlayer.innerHTML = '';
     youtubeIframe = null;
+    // Stop YouTube polling if it was running
+    if (ytPollHandle) {
+      clearInterval(ytPollHandle);
+      ytPollHandle = null;
+    }
+    ytCurrentTime = 0;
+    ytDuration = 0;
+    ytIsPlaying = false;
     video.src = url;
     video.load();
   }
@@ -416,6 +571,13 @@ const LinkHandler = (() => {
     getYouTubeId,
     isYouTubeActive,
     getCurrentSubtitles,
+    // New: time source abstraction for YouTube + direct video
+    getCurrentTime,
+    getDuration,
+    isYouTubePlaying,
+    seekTo,
+    play,
+    pause,
   };
 })();
 

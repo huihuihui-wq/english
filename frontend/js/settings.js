@@ -92,11 +92,84 @@
       input.value = "";
       delete input.dataset.masked;
     }
-    const dictLang = data?.DICT_LANG || "Chinese";
+    // Normalize server "Chinese" / "Japanese" / etc. -> our dropdown codes
+    const dictLang = normalizeDictLang(data?.DICT_LANG);
     const dictLangSel = $("cfgDictLang");
-    if (dictLangSel) {
-      dictLangSel.value = dictLang;
+    if (dictLangSel) dictLangSel.value = dictLang;
+    const translateSel = $("cfgTranslateModel");
+    if (translateSel) translateSel.value = data?.TRANSLATE_MODEL || "qwen-turbo";
+    const wordSel = $("cfgWordModel");
+    if (wordSel) wordSel.value = data?.WORD_LLM_MODEL || "qwen-flash";
+
+    const asrSel = $("cfgAsrModel");
+    if (asrSel) asrSel.value = data?.ASR_MODEL || "qwen3-asr-flash";
+
+    // Subtitle offset (client-side setting, persisted via window.Storage)
+    const offsetSlider = $("cfgSubtitleOffset");
+    const offsetValue = $("cfgSubtitleOffsetValue");
+    if (offsetSlider) {
+      const cur = (window.AppState && window.AppState.settings && parseFloat(window.AppState.settings.subtitleOffset)) || 0;
+      offsetSlider.value = String(cur);
+      if (offsetValue) offsetValue.textContent = `${cur >= 0 ? '+' : ''}${cur.toFixed(1)}s`;
+      offsetSlider.oninput = () => {
+        const v = parseFloat(offsetSlider.value);
+        if (offsetValue) offsetValue.textContent = `${v >= 0 ? '+' : ''}${v.toFixed(1)}s`;
+        if (window.AppState && window.AppState.settings) {
+          window.AppState.settings.subtitleOffset = v;
+        }
+        if (window.Storage) {
+          const s = window.Storage.load();
+          s.subtitleOffset = v;
+          window.Storage.save(s);
+        }
+      };
     }
+
+    // Cloud word-level timestamps indicator (no local model needed)
+    initAsrModelControl(data);
+
+    // Defer cost fetch so DOM is settled
+    setTimeout(refreshCostEstimate, 0);
+  }
+
+  async function initAsrModelControl(data) {
+    const asrSel = $("cfgAsrModel");
+    const statusEl = $("cfgAlignerStatus");
+    if (!asrSel || !statusEl) return;
+
+    statusEl.className = "aligner-status ok";
+    statusEl.textContent = "☁️ Enabled";
+
+    asrSel.onchange = async () => {
+      const v = asrSel.value;
+      try {
+        const r = await fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ASR_MODEL: v }),
+        });
+        if (r.ok) {
+          showStatus("ASR model updated: " + v, "success", 1800);
+        } else {
+          showStatus("Failed to save ASR model", "error");
+        }
+      } catch (e) {
+        showStatus("Failed to save ASR model: " + e.message, "error");
+      }
+    };
+  }
+
+  // Server stores target languages as display names ("Chinese", "Japanese", ...).
+  // Settings UI uses 2-letter codes; map between them.
+  const DICT_LANG_DISPLAY_TO_CODE = {
+    "English": "en", "Chinese": "zh", "Japanese": "ja", "Korean": "ko",
+    "French": "fr", "German": "de", "Spanish": "es", "Portuguese": "pt",
+    "Russian": "ru", "Italian": "it",
+  };
+  function normalizeDictLang(v) {
+    if (!v) return "en";
+    if (/^[a-z]{2}$/.test(v)) return v;
+    return DICT_LANG_DISPLAY_TO_CODE[v] || "en";
   }
 
   async function save() {
@@ -104,20 +177,30 @@
     const isMasked = input.dataset.masked === "1";
     const rawValue = input.value.trim();
     const newKey = isMasked ? "" : rawValue;
-    const dictLang = $("cfgDictLang")?.value || "Chinese";
+    const dictLang = $("cfgDictLang")?.value || "en";
+    const translateModel = $("cfgTranslateModel")?.value || "qwen-turbo";
+    const wordModel = $("cfgWordModel")?.value || "qwen-flash";
+    const asrModel = $("cfgAsrModel")?.value || "qwen3-asr-flash";
     let savedAny = false;
 
     try {
       const dr = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ DICT_LANG: dictLang }),
+        body: JSON.stringify({
+          DICT_LANG: dictLang,
+          TRANSLATE_MODEL: translateModel,
+          WORD_LLM_MODEL: wordModel,
+          ASR_MODEL: asrModel,
+        }),
       });
       if (dr.ok) {
         savedAny = true;
+        const j = await dr.json();
+        fillForm(j);
       }
     } catch (e) {
-      console.warn("[Settings] Failed to save translation language:", e);
+      console.warn("[Settings] Failed to save settings:", e);
     }
 
     if (!newKey) {
@@ -126,6 +209,10 @@
           showStatus("✅ Settings saved", "success");
         } else {
           showStatus("ℹ️ No new key entered. Existing config remains unchanged.", "info");
+        }
+        // Reflect dict lang change in the topbar selector too
+        if (window.NativeLang && window.NativeLang.set) {
+          window.NativeLang.set(dictLang, { persistBackend: false });
         }
         return;
       }
@@ -143,7 +230,13 @@
       const r = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ DASHSCOPE_API_KEY: newKey, DICT_LANG: dictLang }),
+        body: JSON.stringify({
+          DASHSCOPE_API_KEY: newKey,
+          DICT_LANG: dictLang,
+          TRANSLATE_MODEL: translateModel,
+          WORD_LLM_MODEL: wordModel,
+          ASR_MODEL: asrModel,
+        }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
@@ -166,6 +259,7 @@
         savedInput.value = "";
         delete savedInput.dataset.masked;
       }
+      fillForm(j);
       notifyKeyStatus(j.has_api_key);
       await checkAndBanner();
     } catch (e) {
@@ -304,6 +398,50 @@
     $("apiKeyBannerDismiss").addEventListener("click", () => banner.remove());
   }
 
+  async function refreshCostEstimate() {
+    const dailyEl = $("costDaily");
+    const plusEl = $("costPlus");
+    const saveEl = $("costSave");
+    const cacheEl = $("costCache");
+    if (!dailyEl) return;
+    dailyEl.textContent = "…";
+    try {
+      const r = await fetch("/api/cost/estimate");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const cur = d.current_setup || {};
+      const base = d.baseline_qwen_plus || {};
+      const sv = d.savings || {};
+      const tc = d.trans_cache || {};
+      dailyEl.textContent = `¥${(cur.daily_cost_cny || 0).toFixed(4)}`;
+      plusEl.textContent = `¥${(base.daily_cost_cny || 0).toFixed(4)}`;
+      saveEl.textContent = `¥${(sv.daily_cny || 0).toFixed(4)}/day  (${(sv.speedup_x || 1).toFixed(1)}x faster, ${(sv.daily_latency_s || 0).toFixed(1)}s saved)`;
+      cacheEl.textContent = `${tc.disk_files || 0} cached sentences · ${(d.cumulative_savings_from_cache_cny || 0).toFixed(2)} CNY saved cumulatively`;
+    } catch (e) {
+      dailyEl.textContent = "—";
+      if (plusEl) plusEl.textContent = "—";
+      if (saveEl) saveEl.textContent = "—";
+      if (cacheEl) cacheEl.textContent = `(${e.message})`;
+    }
+  }
+
+  async function clearTransCache() {
+    if (!confirm("Clear the subtitle translation cache?\n\nThis forces all subtitles to be re-translated on next request. Useful if you want to switch model and re-evaluate quality.")) return;
+    try {
+      const r = await fetch("/api/cache/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "trans" }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      showStatus(`✅ Cleared ${data.cleared.trans} cached sentences`, "success");
+      refreshCostEstimate();
+    } catch (e) {
+      showStatus("❌ Clear failed: " + e.message, "error");
+    }
+  }
+
   function init() {
     const btn = $("settingsBtn");
     if (btn) btn.addEventListener("click", open);
@@ -346,6 +484,10 @@
         }
       });
     }
+    const clearTransBtn = $("settingsClearTransCacheBtn");
+    if (clearTransBtn) clearTransBtn.addEventListener("click", clearTransCache);
+    const refreshBtn = $("settingsRefreshCostBtn");
+    if (refreshBtn) refreshBtn.addEventListener("click", refreshCostEstimate);
     checkAndBanner();
   }
 

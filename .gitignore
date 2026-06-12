@@ -17,6 +17,9 @@ backend/.venv/
 backend/data/settings.json
 backend/data/history/
 backend/data/dict_cache/
+backend/data/align_cache/
+backend/data/trans_cache/
+backend/data/models/
 backend/.tts_cache/
 
 # Logs

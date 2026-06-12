@@ -1,6 +1,11 @@
 // File upload + backend transcription
 const Uploader = (() => {
   let dropzone, fileInput, pickBtn, progressWrap, progressLabel, progressFill, statusEl;
+  let cancelBtn;
+  // Track the active XHR so the cancel button can abort it.
+  // Only one upload at a time is supported; starting a new one cancels the previous.
+  let activeXhr = null;
+  let activeFile = null;
 
   function init() {
     dropzone = document.getElementById("dropzone");
@@ -10,6 +15,15 @@ const Uploader = (() => {
     progressLabel = document.getElementById("progressLabel");
     progressFill = document.getElementById("progressFill");
     statusEl = document.getElementById("status");
+    cancelBtn = document.getElementById("cancelUploadBtn");
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelUpload();
+      });
+    }
 
     dropzone.addEventListener("click", (e) => {
       if (e.target.tagName === "BUTTON") return;
@@ -35,7 +49,26 @@ const Uploader = (() => {
     fileInput.addEventListener("change", (e) => {
       const f = e.target.files[0];
       if (f) handleFile(f);
+      // Reset the input so selecting the same file again still triggers change
+      e.target.value = "";
     });
+  }
+
+  function cancelUpload() {
+    if (activeXhr) {
+      try {
+        activeXhr.abort();
+      } catch (e) {
+        console.warn("Failed to abort XHR:", e);
+      }
+    }
+    activeXhr = null;
+    activeFile = null;
+    hideProgress();
+    setStatus("Cancelled", "idle");
+    if (window.showToast) {
+      window.showToast("✕ Upload cancelled", "info", 2200);
+    }
   }
 
   function setStatus(text, cls = "idle") {
@@ -59,6 +92,13 @@ const Uploader = (() => {
       alert(`File exceeds ${maxMB}MB limit`);
       return;
     }
+    // If a previous upload is in flight, cancel it before starting a new one.
+    if (activeXhr) {
+      try { activeXhr.abort(); } catch {}
+      activeXhr = null;
+    }
+    activeFile = file;
+
     setStatus("Uploading…", "working");
     setProgress(10, `Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
 
@@ -72,14 +112,19 @@ const Uploader = (() => {
     }
 
     const xhr = new XMLHttpRequest();
+    activeXhr = xhr;
     xhr.open("POST", "/api/transcribe");
+    xhr.timeout = 600000;
     xhr.upload.onprogress = (e) => {
+      // Ignore if this XHR has been superseded by a new upload
+      if (activeXhr !== xhr) return;
       if (e.lengthComputable) {
         const pct = (e.loaded / e.total) * 50;
         setProgress(pct, `Uploading ${(pct * 2).toFixed(0)}%`);
       }
     };
     xhr.onload = () => {
+      if (activeXhr === xhr) activeXhr = null;
       if (xhr.status === 200) {
         try {
           const data = JSON.parse(xhr.responseText);
@@ -116,15 +161,36 @@ const Uploader = (() => {
         fail(msg);
       }
     };
-    xhr.onerror = () => fail("Network error");
-    xhr.onabort = () => fail("Cancelled");
+    xhr.onerror = () => {
+      if (activeXhr === xhr) activeXhr = null;
+      // Don't alert on cancel — we already showed a toast
+      if (xhr.readyState === XMLHttpRequest.UNSENT || xhr.readyState === XMLHttpRequest.DONE) {
+        hideProgress();
+        setStatus("Idle", "idle");
+      } else {
+        fail("Network error");
+      }
+    };
+    xhr.onabort = () => {
+      if (activeXhr === xhr) {
+        activeXhr = null;
+        hideProgress();
+        setStatus("Cancelled", "idle");
+      }
+    };
+    xhr.ontimeout = () => {
+      if (activeXhr === xhr) activeXhr = null;
+      fail("Request timed out. The audio is very long and may exceed server processing limits. Try a shorter clip (under 10 minutes).");
+    };
 
     xhr.send(formData);
 
     setTimeout(() => {
-      if (xhr.readyState !== 4) {
+      if (xhr.readyState !== 4 && activeXhr === xhr) {
         setStatus("Transcribing…", "working");
-        setProgress(60, "AI speech recognition in progress (may take 30-120s)");
+        const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        const estimatedTime = Math.max(30, Math.round(sizeMB * 5));
+        setProgress(60, `AI speech recognition in progress (may take ${estimatedTime}s-${Math.round(estimatedTime * 2)}s for ${sizeMB}MB file)`);
       }
     }, 500);
   }

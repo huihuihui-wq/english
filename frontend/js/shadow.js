@@ -61,7 +61,17 @@ const Shadow = (() => {
     currentLoopIdx = sentenceIdx;
     loopsDone = 0;
     phase = "play";
+    advancePastPlaceholders();
+    if (currentLoopIdx >= subs.length) { busyFlag = false; return; }
     playCurrentSentence();
+  }
+
+  // Skip silent (placeholder) entries — shadow practice is for speech only
+  function advancePastPlaceholders() {
+    const subs = window.Player.getSubtitles();
+    while (currentLoopIdx < subs.length && subs[currentLoopIdx] && subs[currentLoopIdx].is_placeholder) {
+      currentLoopIdx += 1;
+    }
   }
 
   function playCurrentSentence() {
@@ -72,6 +82,7 @@ const Shadow = (() => {
     const subs = window.Player.getSubtitles();
     const s = subs[currentLoopIdx];
     if (!s) { busyFlag = false; return; }
+    if (s.is_placeholder) { advancePastPlaceholders(); }
 
     phase = "play";
     window.Player.seekTo(s.start);
@@ -116,6 +127,7 @@ const Shadow = (() => {
           if (abortFlag || !enabled) { busyFlag = false; return; }
           currentLoopIdx += 1;
           loopsDone = 0;
+          advancePastPlaceholders();
           if (currentLoopIdx >= window.Player.getSubtitles().length) {
             busyFlag = false;
             return;
@@ -125,6 +137,7 @@ const Shadow = (() => {
       } else {
         currentLoopIdx += 1;
         loopsDone = 0;
+        advancePastPlaceholders();
         if (currentLoopIdx >= window.Player.getSubtitles().length) {
           busyFlag = false;
           return;

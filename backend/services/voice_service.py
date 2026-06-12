@@ -143,7 +143,7 @@ def _parse_tts_response(resp: dict) -> Tuple[bytes, List[dict]]:
 
 
 async def synthesize(text: str, voice: str = "", language_type: str = "English") -> tuple[bytes, dict]:
-    """Synthesize text to audio bytes using qwen3-tts-instruct-flash-realtime.
+    """Synthesize text to audio bytes using qwen-tts.
     
     Returns (audio_bytes, metadata).
     Metadata includes: voice, language_type, cached, size, words (list of word timestamps).
@@ -178,21 +178,15 @@ async def synthesize(text: str, voice: str = "", language_type: str = "English")
 
     url = f"{cfg['base_url']}/services/aigc/multimodal-generation/generation"
     
-    # Build prompt with voice instruction
-    system_prompt = f"You are a text-to-speech assistant. Use voice '{voice}' for synthesis."
-    
     payload = {
-        "model": "qwen3-tts-instruct-flash-realtime",
+        "model": "qwen-tts",
         "input": {
-            "messages": [
-                {"role": "system", "content": [{"text": system_prompt}]},
-                {"role": "user", "content": [{"text": text}]},
-            ]
+            "text": text
         },
         "parameters": {
+            "voice": voice,
             "sample_rate": 24000,
             "format": "mp3",
-            "speed": 1.0,
         }
     }
     
@@ -212,7 +206,21 @@ async def synthesize(text: str, voice: str = "", language_type: str = "English")
         raise RuntimeError(f"TTS failed: {resp.status_code} {resp.text[:300]}")
 
     result = resp.json()
-    audio_bytes, words = _parse_tts_response(result)
+    
+    # Parse response - qwen-tts returns audio URL
+    audio_url = result.get("output", {}).get("audio", {}).get("url", "")
+    if not audio_url:
+        raise RuntimeError("TTS response did not contain audio URL")
+    
+    # Download audio from URL
+    logger.info("TTS audio URL: %s", audio_url[:100])
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        audio_resp = await client.get(audio_url)
+        if audio_resp.status_code != 200:
+            raise RuntimeError(f"Failed to download audio: {audio_resp.status_code}")
+        audio_bytes = audio_resp.content
+    
+    words = []  # qwen-tts doesn't provide word timestamps
     
     # Save to cache
     cache_file.write_bytes(audio_bytes)

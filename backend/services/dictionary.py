@@ -4,7 +4,7 @@ Tier 0: local disk cache (data/dict_cache/<sha1(word)>.json) — schema stores
         the base English entry plus a `translations` map keyed by target lang.
 Tier 1: free public API (https://api.dictionaryapi.dev/api/v2/entries/en/<word>)
         — supplies English meaning/examples only.
-Tier 2: DashScope qwen-plus — supplies:
+Tier 2: DashScope LLM (default qwen-flash) — supplies:
         - full English entry when L1 misses
         - translation of meaning/examples into the requested native lang
 
@@ -58,6 +58,11 @@ _DICT_LANG_IDS = {x["id"] for x in SUPPORTED_DICT_LANGS}
 _DICT_LANG_NAMES = {x["id"]: x["name"] for x in SUPPORTED_DICT_LANGS}
 
 DEFAULT_DICT_LANG = "en"
+DEFAULT_WORD_LLM_MODEL = "qwen-flash"  # small, fast, cheap — for short LLM prompts
+
+
+def _word_llm_model() -> str:
+    return get_setting("WORD_LLM_MODEL", DEFAULT_WORD_LLM_MODEL)
 
 
 def normalize_target_lang(lang: Optional[str]) -> str:
@@ -100,6 +105,50 @@ def _write_disk_cache(word: str, entry: dict) -> None:
         )
     except Exception as e:
         logger.warning("[dict] Failed to write cache for %s: %s", word, e)
+
+
+def _parse_roots(raw: Any) -> dict:
+    """Normalize a roots object from the LLM into {prefix, root, suffix}."""
+    out = {"prefix": "", "root": "", "suffix": ""}
+    if not isinstance(raw, dict):
+        return out
+    for k in ("prefix", "root", "suffix"):
+        v = raw.get(k)
+        if isinstance(v, str):
+            out[k] = v.strip()
+    return out
+
+
+def _parse_string_list(raw: Any, max_items: int = 6) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in raw[:max_items]:
+        if isinstance(x, str):
+            s = x.strip()
+            if s and s.lower() not in seen:
+                out.append(s)
+                seen.add(s.lower())
+    return out
+
+
+def _parse_related(raw: Any, max_items: int = 4) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for x in raw[:max_items]:
+        if not isinstance(x, dict):
+            continue
+        w = (x.get("word") or "").strip()
+        if not w:
+            continue
+        out.append({
+            "word": w,
+            "pos": (x.get("pos") or "").strip(),
+            "gloss_en": (x.get("gloss_en") or "").strip(),
+        })
+    return out
 
 
 def _parse_free_dict(data: Any, original: str) -> Optional[dict]:
@@ -145,6 +194,10 @@ def _parse_free_dict(data: Any, original: str) -> Optional[dict]:
             "meaning_en": meaning_en,
             "examples": examples,
             "translations": {},
+            "roots": {"prefix": "", "root": "", "suffix": ""},
+            "etymology_en": "",
+            "family": [],
+            "related": [],
             "source": "api:free-dict",
         }
     except Exception as e:
@@ -181,7 +234,7 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
         "DASHSCOPE_COMPATIBLE_URL",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
-    model = get_setting("TRANSLATE_MODEL", "qwen-plus")
+    model = _word_llm_model()
 
     target_name = _DICT_LANG_NAMES.get(target_lang, "English")
     needs_translation = target_lang != "en"
@@ -195,7 +248,11 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
             '"meaning_en" (concise English definition, 1 sentence), '
             f'"meaning_translation" (concise {target_name} definition, 1-2 short phrases), '
             '"examples" (array of up to 2 objects, each with keys "en" (natural English example sentence) '
-            f'and "translation" (the {target_name} translation of that sentence)). '
+            f'and "translation" (the {target_name} translation of that sentence)), '
+            '"roots" (object with "prefix" (e.g. "epi-", may be empty string), "root" (the core morpheme in Latin/Greek/Old English, may be empty), "suffix" (e.g. "-al", may be empty string)), '
+            '"etymology_en" (one short English sentence explaining the word\'s origin; empty string if unclear), '
+            '"family" (array of up to 6 strings — inflected/derived forms of this word, e.g. ["ephemeral","ephemerality","ephemerally","ephemeron"]; may be empty), '
+            '"related" (array of up to 4 objects {word, pos, gloss_en} for other common English words sharing the same root, do NOT include the input word itself; may be empty). '
             "No markdown, no code fences, no explanation. Output JSON only."
         )
     else:
@@ -205,7 +262,11 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
             '"phonetic" (IPA string, may be empty), '
             '"pos" (part of speech: noun/verb/adjective/adverb/preposition/conjunction/pronoun/interjection/exclamation, may be empty), '
             '"meaning_en" (concise English definition, 1 sentence), '
-            '"examples" (array of up to 2 objects, each with key "en" (natural English example sentence)). '
+            '"examples" (array of up to 2 objects, each with key "en" (natural English example sentence)), '
+            '"roots" (object with "prefix" (e.g. "epi-", may be empty string), "root" (the core morpheme, may be empty), "suffix" (e.g. "-al", may be empty string)), '
+            '"etymology_en" (one short English sentence explaining the word\'s origin; empty string if unclear), '
+            '"family" (array of up to 6 strings of inflected/derived forms of this word; may be empty), '
+            '"related" (array of up to 4 objects {word, pos, gloss_en} for other common English words sharing the same root, do NOT include the input word itself; may be empty). '
             "No markdown, no code fences, no explanation. Output JSON only."
         )
     user_prompt = f'Word: "{word.lower()}"'
@@ -272,6 +333,12 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
             elif isinstance(ex, str) and ex.strip():
                 examples.append({"en": ex.strip()})
 
+    # Word root / etymology / family / related (optional fields, L1 doesn't provide)
+    roots = _parse_roots(obj.get("roots"))
+    etymology_en = (obj.get("etymology_en") or "").strip()
+    family = _parse_string_list(obj.get("family"), max_items=6)
+    related = _parse_related(obj.get("related"), max_items=4)
+
     entry: dict = {
         "word": word,
         "lemma": word.lower(),
@@ -280,7 +347,11 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
         "meaning_en": (obj.get("meaning_en") or "").strip(),
         "examples": examples,
         "translations": {},
-        "source": "llm:qwen-plus",
+        "roots": roots,
+        "etymology_en": etymology_en,
+        "family": family,
+        "related": related,
+        "source": f"llm:{model}",
     }
     if needs_translation:
         mt = (obj.get("meaning_translation") or "").strip()
@@ -288,8 +359,12 @@ async def _llm_generate_full_entry(word: str, target_lang: str) -> Optional[dict
             entry["translations"] = {
                 target_lang: {
                     "meaning": mt,
-                    "source": "llm:qwen-plus",
+                    "source": f"llm:{model}",
                 }
+            }
+        if etymology_en:
+            entry["etymology_translations"] = {
+                target_lang: etymology_en  # LLM will translate this in a follow-up if non-en target needs it
             }
     return entry
 
@@ -307,20 +382,24 @@ async def _llm_translate_entry(entry: dict, target_lang: str) -> Optional[dict]:
         "DASHSCOPE_COMPATIBLE_URL",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
-    model = get_setting("TRANSLATE_MODEL", "qwen-plus")
+    model = _word_llm_model()
     target_name = _DICT_LANG_NAMES.get(target_lang, target_lang)
 
     examples_en = [ex.get("en", "") for ex in (entry.get("examples") or []) if ex.get("en")]
+    etymology_en = (entry.get("etymology_en") or "").strip()
     payload = {
         "meaning_en": entry.get("meaning_en", ""),
         "examples_en": examples_en,
+        "etymology_en": etymology_en,
     }
     system_prompt = (
         f"You are a translation engine from English to {target_name}. "
-        "Given a JSON object with `meaning_en` (English definition) and `examples_en` "
-        "(a list of up to 2 English example sentences), output ONLY one JSON object with: "
+        "Given a JSON object with `meaning_en` (English definition), `examples_en` "
+        "(a list of up to 2 English example sentences), and optionally `etymology_en` "
+        "(a short English sentence about the word's origin), output ONLY one JSON object with: "
         f'"meaning" (concise {target_name} definition, 1-2 short phrases), '
-        f'"examples" (array of strings, each the {target_name} translation of the corresponding English example, same order). '
+        f'"examples" (array of strings, each the {target_name} translation of the corresponding English example, same order), '
+        f'"etymology" (the {target_name} translation of etymology_en, or empty string if etymology_en is empty). '
         "If a field is missing in the input, return an empty string or empty array for the corresponding output. "
         "No markdown, no code fences, no explanation. Output JSON only."
     )
@@ -379,27 +458,36 @@ async def _llm_translate_entry(entry: dict, target_lang: str) -> Optional[dict]:
             elif isinstance(x, dict):
                 first = next((v for v in x.values() if isinstance(v, str)), "")
                 examples_tr.append(first.strip())
+    etymology_tr = (obj.get("etymology") or "").strip()
 
-    if not meaning and not any(examples_tr):
+    if not meaning and not any(examples_tr) and not etymology_tr:
         return None
 
-    return {
+    out = {
         "meaning": meaning,
         "examples": examples_tr,
-        "source": "llm:qwen-plus",
+        "source": f"llm:{model}",
     }
+    if etymology_tr:
+        out["etymology"] = etymology_tr
+    return out
 
 
 def _apply_translation(entry: dict, lang: str, tr: dict) -> None:
     """Apply a translation sub-record onto the entry (in-place)."""
     entry.setdefault("translations", {})
-    entry["translations"][lang] = {"meaning": tr.get("meaning", ""), "source": tr.get("source", "llm:qwen-plus")}
+    entry["translations"][lang] = {"meaning": tr.get("meaning", ""), "source": tr.get("source", f"llm:{_word_llm_model()}")}
     # Splice per-example translations
     ex_list = entry.get("examples") or []
     ex_tr = tr.get("examples") or []
     for i, ex in enumerate(ex_list):
         if i < len(ex_tr) and ex_tr[i] and isinstance(ex, dict):
             ex[lang] = ex_tr[i]
+    # Store etymology translation if provided
+    ety_tr = (tr.get("etymology") or "").strip()
+    if ety_tr:
+        entry.setdefault("etymology_translations", {})
+        entry["etymology_translations"][lang] = ety_tr
 
 
 def _build_response(entry: dict, word: str, target_lang: str, hit_source: str) -> dict:
@@ -423,6 +511,38 @@ def _build_response(entry: dict, word: str, target_lang: str, hit_source: str) -
                 ex_out[target_lang] = tr_text
         examples.append(ex_out)
 
+    # Word root / etymology / family / related
+    roots = entry.get("roots") or {"prefix": "", "root": "", "suffix": ""}
+    if not isinstance(roots, dict):
+        roots = {"prefix": "", "root": "", "suffix": ""}
+    roots = {k: (str(roots.get(k) or "").strip()) for k in ("prefix", "root", "suffix")}
+
+    family = entry.get("family") or []
+    if not isinstance(family, list):
+        family = []
+    family = [str(x).strip() for x in family if isinstance(x, str) and x.strip()]
+
+    related = entry.get("related") or []
+    if not isinstance(related, list):
+        related = []
+    related_clean = []
+    for r in related[:4]:
+        if not isinstance(r, dict):
+            continue
+        w = (r.get("word") or "").strip()
+        if not w:
+            continue
+        related_clean.append({
+            "word": w,
+            "pos": (r.get("pos") or "").strip(),
+            "gloss_en": (r.get("gloss_en") or "").strip(),
+        })
+
+    etymology_en = (entry.get("etymology_en") or "").strip()
+    etymology_native = ""
+    if target_lang != "en" and isinstance(entry.get("etymology_translations"), dict):
+        etymology_native = (entry["etymology_translations"].get(target_lang) or "").strip()
+
     return {
         "word": entry.get("word") or word,
         "lemma": entry.get("lemma") or word.lower(),
@@ -432,6 +552,11 @@ def _build_response(entry: dict, word: str, target_lang: str, hit_source: str) -
         "meaning_native": meaning_native,
         "native_lang": target_lang,
         "examples": examples,
+        "roots": roots,
+        "etymology_en": etymology_en,
+        "etymology_native": etymology_native,
+        "family": family,
+        "related": related_clean,
         "source": hit_source,
     }
 
@@ -496,7 +621,7 @@ async def lookup_word(word: str, target_lang: Optional[str] = None) -> dict:
     entry = await _llm_generate_full_entry(key, target_lang)
     if entry and (entry.get("meaning_en") or (entry.get("translations") or {}).get(target_lang)):
         _write_disk_cache(key, entry)
-        response = _build_response(entry, key, target_lang, "llm:qwen-plus")
+        response = _build_response(entry, key, target_lang, entry.get("source") or f"llm:{_word_llm_model()}")
         with _mem_lock:
             _mem_cache[mem_key] = response
         return response

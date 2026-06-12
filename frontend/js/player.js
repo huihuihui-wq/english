@@ -7,6 +7,9 @@ const Player = (() => {
   let objectUrl = null;
   let isVideoFile = false;
 
+  let currentTranslationEl, currentTranslationTextEl;
+  let autoFollow = true;
+
   function init() {
     video = document.getElementById("video");
     playBtn = document.getElementById("playBtn");
@@ -22,6 +25,8 @@ const Player = (() => {
     subtitleCard = document.getElementById("subtitleCard");
     subtitleList = document.getElementById("subtitleList");
     subStats = document.getElementById("subStats");
+    currentTranslationEl = document.getElementById("currentTranslation");
+    currentTranslationTextEl = document.getElementById("currentTranslationText");
 
     playBtn.addEventListener("click", togglePlay);
     prevBtn.addEventListener("click", () => goRelative(-1));
@@ -37,13 +42,40 @@ const Player = (() => {
     window.addEventListener("link:subtitles-loaded", (e) => {
       if (e.detail && e.detail.subtitles) {
         loadSubtitles(e.detail.subtitles);
+        // If YouTube is active, start the time sync poller
+        if (window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive()) {
+          startYouTubeTimeSync();
+        }
       }
     });
 
+    // Auto-start YouTube time sync when YouTube video is loaded
+    // (fires before subtitles may be loaded).
+    let _ytAutoStartCheck = setInterval(() => {
+      if (window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive()) {
+        if (!_ytSyncHandle) startYouTubeTimeSync();
+      } else {
+        if (_ytSyncHandle) stopYouTubeTimeSync();
+      }
+    }, 500);
+
     seek.addEventListener("input", (e) => {
-      if (!video.duration) return;
-      video.currentTime = (e.target.value / 100) * video.duration;
+      const d = getDuration();
+      if (!d) return;
+      const newT = (e.target.value / 100) * d;
+      if (isYouTubeActive() && window.LinkHandler) {
+        window.LinkHandler.seekTo(newT);
+      } else {
+        video.currentTime = newT;
+      }
     });
+
+    const autoFollowToggle = document.getElementById("autoFollowToggle");
+    if (autoFollowToggle) {
+      autoFollowToggle.addEventListener("change", (e) => {
+        autoFollow = e.target.checked;
+      });
+    }
 
     initResizer();
   }
@@ -56,6 +88,9 @@ const Player = (() => {
 
     isVideoFile = file.type.startsWith("video/");
     video.classList.toggle("audio-only", !isVideoFile);
+
+    // Local file mode - stop YouTube sync if it was running
+    stopYouTubeTimeSync();
 
     fileNameEl.textContent = file.name;
     splitWrap.hidden = false;
@@ -76,6 +111,9 @@ const Player = (() => {
     isVideoFile = url.match(/\.(mp4|webm|ogg|mov)(\?.*)?$/i) !== null;
     video.classList.toggle("audio-only", !isVideoFile);
 
+    // Direct video mode - stop YouTube sync
+    stopYouTubeTimeSync();
+
     fileNameEl.textContent = data.title || "Online Video";
     splitWrap.hidden = false;
     document.body.classList.add("playing");
@@ -90,11 +128,69 @@ const Player = (() => {
     updateTimeDisplay();
   }
 
+  // Throttle subtitle sync to ~20 fps so that rapid timeupdate bursts
+  // (e.g. during seeking or fast playback) don’t queue redundant DOM work.
+  let _lastSyncTime = 0;
   function onTimeUpdate() {
     updateTimeDisplay();
     updateSeekBar();
-    syncActiveSubtitle();
+    const now = performance.now();
+    if (now - _lastSyncTime > 50) {
+      _lastSyncTime = now;
+      syncActiveSubtitle();
+    }
     reportProgressThrottled();
+  }
+
+  // Cross-source time/duration/play-state accessors.
+  // YouTube IFrame does not fire 'timeupdate' on the local <video> element,
+  // so we use LinkHandler.getCurrentTime() which polls the IFrame.
+  function getCurrentTime() {
+    if (window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive()) {
+      return window.LinkHandler.getCurrentTime();
+    }
+    return video ? (video.currentTime || 0) : 0;
+  }
+
+  function getDuration() {
+    if (window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive()) {
+      return window.LinkHandler.getDuration();
+    }
+    return video ? (video.duration || 0) : 0;
+  }
+
+  function isPlaying() {
+    if (window.LinkHandler && window.LinkHandler.isYouTubeActive && window.LinkHandler.isYouTubeActive()) {
+      return window.LinkHandler.isYouTubePlaying();
+    }
+    return video ? !video.paused : false;
+  }
+
+  // Independent YouTube time polling - runs every 250ms when YouTube is active.
+  // The local <video> element's timeupdate doesn't fire for YouTube iframes,
+  // so we need a separate poller to drive subtitle sync.
+  let _ytSyncHandle = null;
+  function startYouTubeTimeSync() {
+    if (_ytSyncHandle) return;
+    _ytSyncHandle = setInterval(() => {
+      if (!window.LinkHandler || !window.LinkHandler.isYouTubeActive()) {
+        stopYouTubeTimeSync();
+        return;
+      }
+      syncActiveSubtitle();
+      updateTimeDisplay();
+      updateSeekBar();
+      reportProgressThrottled();
+    }, 250);
+    console.log('[Player] YouTube time sync started');
+  }
+
+  function stopYouTubeTimeSync() {
+    if (_ytSyncHandle) {
+      clearInterval(_ytSyncHandle);
+      _ytSyncHandle = null;
+      console.log('[Player] YouTube time sync stopped');
+    }
   }
 
   let _lastReport = 0;
@@ -103,7 +199,7 @@ const Player = (() => {
     if (now - _lastReport < 5000) return;
     _lastReport = now;
     if (window.History && window.History.currentId) {
-      const t = video.currentTime || 0;
+      const t = getCurrentTime();
       if (t > 0.5) {
         window.HistoryReportProgress && window.HistoryReportProgress(window.History.currentId, t);
       }
@@ -115,47 +211,110 @@ const Player = (() => {
   }
 
   function updateTimeDisplay() {
-    timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration || 0)}`;
+    const t = getCurrentTime();
+    const d = getDuration();
+    timeDisplay.textContent = `${formatTime(t)} / ${formatTime(d)}`;
   }
 
   function updateSeekBar() {
-    if (video.duration) {
-      seek.value = (video.currentTime / video.duration) * 100;
+    const t = getCurrentTime();
+    const d = getDuration();
+    if (d) {
+      seek.value = (t / d) * 100;
     }
   }
 
   function syncActiveSubtitle() {
     if (!subtitles.length) return;
-    const t = video.currentTime;
+    const offset = (window.AppState && window.AppState.settings && window.AppState.settings.subtitleOffset) || 0;
+    const t = getCurrentTime() - offset;
     let idx = -1;
-    for (let i = 0; i < subtitles.length; i++) {
-      if (t >= subtitles[i].start && t < subtitles[i].end) {
-        idx = i;
+
+    // Binary search O(log n) instead of linear O(n).
+    // subtitles are strictly sorted by start time.
+    let lo = 0, hi = subtitles.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const s = subtitles[mid];
+      if (t >= s.start && t < s.end) {
+        idx = mid;
         break;
       }
+      if (t < s.start) {
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
     }
+
+    // Handle edge case: past the very last subtitle
     if (idx === -1 && t >= subtitles[subtitles.length - 1].end) {
       idx = subtitles.length - 1;
     }
+
     if (idx !== currentIndex && idx !== -1) {
       setActiveSubtitle(idx);
     }
   }
 
   function setActiveSubtitle(idx) {
+    if (idx === currentIndex) return;
+    const prevIdx = currentIndex;
     currentIndex = idx;
-    const items = subtitleList.querySelectorAll(".sub-item");
-    items.forEach((el, i) => {
-      el.classList.toggle("active", i === idx);
-      el.classList.toggle("done", i < idx);
-    });
-    const active = items[idx];
-    if (active) {
-      const listRect = subtitleList.getBoundingClientRect();
-      const itemRect = active.getBoundingClientRect();
-      if (itemRect.top < listRect.top + 40 || itemRect.bottom > listRect.bottom - 40) {
-        active.scrollIntoView({ block: "center", behavior: "smooth" });
+
+    const items = subtitleList.children;
+    if (!items || !items.length) return;
+
+    // 1. Update active class — only 2 elements touched (prev + curr).
+    if (prevIdx >= 0 && prevIdx < items.length) {
+      items[prevIdx].classList.remove("active");
+    }
+    if (idx >= 0 && idx < items.length) {
+      items[idx].classList.add("active");
+    }
+
+    // 2. Update done class — only the range between prev and curr.
+    const start = Math.min(prevIdx < 0 ? 0 : prevIdx, idx);
+    const end = Math.max(prevIdx < 0 ? 0 : prevIdx, idx);
+    for (let i = start; i <= end && i < items.length; i++) {
+      const shouldBeDone = i < idx;
+      const el = items[i];
+      if (el.classList.contains("done") !== shouldBeDone) {
+        el.classList.toggle("done", shouldBeDone);
       }
+    }
+
+    // 3. Update translation display.
+    updateCurrentTranslation(idx);
+
+    // 4. Scroll — only if user enabled auto-follow AND the item is off-screen.
+    // We use offsetTop / clientHeight instead of getBoundingClientRect to avoid
+    // forced synchronous layout of the entire document.
+    if (autoFollow && idx >= 0 && idx < items.length) {
+      const curr = items[idx];
+      const listTop = subtitleList.scrollTop;
+      const listBottom = listTop + subtitleList.clientHeight;
+      const itemTop = curr.offsetTop;
+      const itemBottom = itemTop + curr.clientHeight;
+      if (itemTop < listTop || itemBottom > listBottom) {
+        curr.scrollIntoView({ block: "nearest", behavior: "auto" });
+      }
+    }
+  }
+
+  function updateCurrentTranslation(idx) {
+    if (!currentTranslationEl || !currentTranslationTextEl) return;
+    const s = subtitles[idx];
+    if (!s) {
+      currentTranslationEl.hidden = true;
+      return;
+    }
+    const text = currentTranslationField ? s[currentTranslationField] : "";
+    if (text && String(text).trim()) {
+      currentTranslationTextEl.textContent = text;
+      currentTranslationEl.hidden = false;
+    } else {
+      currentTranslationEl.hidden = true;
     }
   }
 
@@ -182,8 +341,18 @@ const Player = (() => {
     let emptyCount = 0;
     subtitles.forEach((s, i) => {
       const li = document.createElement("li");
-      li.className = "sub-item";
+      const ptype = s.placeholder_type || "silence";
+      li.className = "sub-item" + (s.is_placeholder ? " placeholder placeholder-" + ptype : "");
       li.dataset.idx = i;
+      if (s.is_placeholder) {
+        const ptypeTitle = {
+          music: "Music segment",
+          applause: "Applause segment",
+          silence: "Silent segment",
+          noise: "Noise segment",
+        }[ptype] || "Silent segment";
+        li.title = `${ptypeTitle} — click to jump`;
+      }
       let translationText = "";
       if (showTranslation) {
         const raw = s[currentTranslationField];
@@ -193,15 +362,30 @@ const Player = (() => {
         if (translationText) renderedCount++;
         else emptyCount++;
       }
+      const enHtml = s.is_placeholder
+        ? `<span class="placeholder-label">${escapeHtml(s.en || "🤐 silence")}</span>`
+        : renderWordsHtml(s.en || "");
       li.innerHTML = `
         <span class="sub-num">${i + 1}</span>
         <div class="sub-content">
-          <div class="sub-en">${renderWordsHtml(s.en || "")}</div>
+          <div class="sub-en">${enHtml}</div>
           ${translationText ? `<div class="sub-zh sub-translation" data-translation-field="${currentTranslationField}">${escapeHtml(translationText)}</div>` : ""}
         </div>
-        <span class="sub-time">${formatTime(s.start)}</span>
+        <div class="sub-actions">
+          <button class="sub-ask-ai" data-idx="${i}" title="问 AI">🤖 问AI</button>
+          <span class="sub-time">${formatTime(s.start)}</span>
+        </div>
       `;
       li.addEventListener("click", (ev) => {
+        const askBtn = ev.target.closest(".sub-ask-ai");
+        if (askBtn) {
+          ev.stopPropagation();
+          const subText = s.en || "";
+          if (subText && window.AIAssistant) {
+            window.AIAssistant.askAboutSubtitle(subText);
+          }
+          return;
+        }
         const wordEl = ev.target.closest(".word");
         if (wordEl && window.WordLookup) {
           ev.stopPropagation();
@@ -209,6 +393,29 @@ const Player = (() => {
           return;
         }
         jumpToSentence(i);
+      });
+      // Right-click context menu: reset this line's start to current playback time.
+      li.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        const cur = getCurrentTime();
+        const newStart = Math.max(0, cur);
+        const oldStart = s.start;
+        const oldEnd = s.end;
+        s.start = newStart;
+        // Preserve duration; if the line would overlap the next, clamp end.
+        s.end = newStart + (oldEnd - oldStart);
+        if (i + 1 < subtitles.length && s.end > subtitles[i + 1].start) {
+          s.end = subtitles[i + 1].start;
+        }
+        // Re-render the whole list to reflect the new time display
+        renderSubtitles();
+        if (window.showToast) {
+          window.showToast(
+            `✓ Subtitle #${i + 1} start: ${oldStart.toFixed(2)}s → ${newStart.toFixed(2)}s`,
+            'success',
+            2200,
+          );
+        }
       });
       subtitleList.appendChild(li);
     });
@@ -224,9 +431,15 @@ const Player = (() => {
 
   function jumpToSentence(idx) {
     if (!subtitles[idx]) return;
-    video.currentTime = subtitles[idx].start;
+    const startT = subtitles[idx].start;
+    if (isYouTubeActive() && window.LinkHandler) {
+      window.LinkHandler.seekTo(startT);
+      window.LinkHandler.play();
+    } else {
+      video.currentTime = startT;
+      if (video.paused) video.play();
+    }
     setActiveSubtitle(idx);
-    if (video.paused) video.play();
   }
 
   function goRelative(delta) {
@@ -241,13 +454,23 @@ const Player = (() => {
 
   function replayCurrent() {
     if (currentIndex === -1) {
-      video.currentTime = 0;
-      video.play();
+      if (isYouTubeActive() && window.LinkHandler) {
+        window.LinkHandler.seekTo(0);
+        window.LinkHandler.play();
+      } else {
+        video.currentTime = 0;
+        video.play();
+      }
       return;
     }
     const s = subtitles[currentIndex];
-    video.currentTime = s.start;
-    video.play();
+    if (isYouTubeActive() && window.LinkHandler) {
+      window.LinkHandler.seekTo(s.start);
+      window.LinkHandler.play();
+    } else {
+      video.currentTime = s.start;
+      video.play();
+    }
   }
 
   function isYouTubeActive() {
@@ -270,14 +493,14 @@ const Player = (() => {
 
   function togglePlay() {
     if (isYouTubeActive()) {
-      const iframe = getYouTubeIframe();
-      if (!iframe) return;
-      if (playBtn.textContent === '▶') {
-        sendYouTubeCommand('playVideo');
-        playBtn.textContent = '⏸';
-      } else {
-        sendYouTubeCommand('pauseVideo');
-        playBtn.textContent = '▶';
+      if (window.LinkHandler) {
+        if (window.LinkHandler.isYouTubePlaying()) {
+          window.LinkHandler.pause();
+          playBtn.textContent = '▶';
+        } else {
+          window.LinkHandler.play();
+          playBtn.textContent = '⏸';
+        }
       }
       return;
     }
@@ -296,15 +519,19 @@ const Player = (() => {
 
   function getCurrent() { return currentIndex; }
   function getSubtitles() { return subtitles; }
-  function getDuration() { return video.duration || 0; }
-  function getCurrentTime() { return video.currentTime || 0; }
   function seekTo(t) {
-    if (video.src) video.currentTime = t;
+    if (isYouTubeActive() && window.LinkHandler) {
+      window.LinkHandler.seekTo(t);
+    } else if (video.src) {
+      video.currentTime = t;
+    }
   }
 
   function loadSubtitles(newSubtitles, options = {}) {
     subtitles = newSubtitles || [];
     currentIndex = -1;
+    const phCount = subtitles.filter((s) => s.is_placeholder).length;
+    console.log(`[Player] loadSubtitles: ${subtitles.length} total (${phCount} placeholders)`);
     if (!options.skipAutoTranslation) {
       const savedLang = window.AppState?.settings?.targetLang;
       if (savedLang) {

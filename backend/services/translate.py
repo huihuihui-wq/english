@@ -1,9 +1,20 @@
-"""Translation service using DashScope qwen-plus via OpenAI-compatible chat completions."""
+"""Translation service using DashScope chat completions.
+
+Default model: qwen-turbo (fast + cheap, good enough for sentence translation).
+Configurable via TRANSLATE_MODEL env / settings.
+
+Per-sentence results are cached in data/trans_cache/ so repeated sentences
+across videos (or within the same video) cost nothing.
+"""
 import json
 import logging
 import re
+import time
+from typing import Optional
 
 import httpx
+
+from services import sentence_cache
 
 logger = logging.getLogger(__name__)
 
@@ -64,30 +75,97 @@ def _get_config():
             "DASHSCOPE_COMPATIBLE_URL",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
         ),
-        "model": get_setting("TRANSLATE_MODEL", "qwen-plus"),
+        "model": get_setting("TRANSLATE_MODEL", "qwen-turbo"),
     }
 
 
-async def translate_sentences(sentences: list[str], target_lang: str = "Chinese", source_lang: str = "English") -> list[dict]:
-    """Translate sentences from source_lang to target_lang, returning [{en, <field>}, ...]."""
+async def translate_sentences(sentences: list[str], target_lang: str = "Chinese", source_lang: str = "English", use_cache: bool = True) -> dict:
+    """Translate sentences from source_lang to target_lang.
+
+    Returns:
+        {
+            "translations": [{en, <field>}, ...],   # same length as input, in order
+            "cache_hits": int,                       # how many came from disk cache
+            "llm_calls": int,                        # how many LLM roundtrips
+            "elapsed_s": float,
+            "model": str,                            # model used
+            "field": str,                            # target field name (e.g. "zh")
+        }
+    """
+    t0 = time.time()
     if not sentences:
-        return []
+        return {
+            "translations": [],
+            "cache_hits": 0,
+            "llm_calls": 0,
+            "elapsed_s": 0.0,
+            "model": "",
+            "field": "",
+        }
 
     target = _TARGET_LANG_MAP.get(target_lang)
     if not target:
         raise ValueError(f"Unsupported target language: {target_lang}. Available: {list(_TARGET_LANG_MAP.keys())}")
+    expected_field = target["field"]
 
+    # Step 1: per-sentence cache lookup
+    cached: list[Optional[str]] = [None] * len(sentences)
+    miss_idx: list[int] = []
+    cache_hits = 0
+    if use_cache:
+        cached = sentence_cache.bulk_get(sentences, target_lang, source_lang=source_lang)
+        for i, c in enumerate(cached):
+            if c:
+                cache_hits += 1
+            else:
+                miss_idx.append(i)
+
+    # Step 2: LLM only the misses, in one batched call
+    llm_calls = 0
+    if miss_idx:
+        miss_sentences = [sentences[i] for i in miss_idx]
+        llm_results = await _llm_translate_batch(miss_sentences, target_lang, source_lang)
+        llm_calls = 1
+        for local_i, global_i in enumerate(miss_idx):
+            tr = llm_results[local_i] if local_i < len(llm_results) else ""
+            cached[global_i] = tr
+            if tr:
+                sentence_cache.put(sentences[global_i], target_lang, tr, source_lang=source_lang)
+
+    # Step 3: assemble response
+    out = []
+    for i, en in enumerate(sentences):
+        out.append({"en": en, expected_field: cached[i] or ""})
+
+    elapsed = time.time() - t0
+    logger.info(
+        "Translate done: %d sentences, cache_hits=%d, llm_calls=%d, elapsed=%.2fs",
+        len(sentences), cache_hits, llm_calls, elapsed,
+    )
+    return {
+        "translations": out,
+        "cache_hits": cache_hits,
+        "llm_calls": llm_calls,
+        "elapsed_s": round(elapsed, 3),
+        "model": _get_config()["model"],
+        "field": expected_field,
+    }
+
+
+async def _llm_translate_batch(sentences: list[str], target_lang: str, source_lang: str) -> list[str]:
+    """Call the LLM once for a batch of sentences. Returns translations in order."""
+    if not sentences:
+        return []
     cfg = _get_config()
     if not cfg["api_key"]:
         raise RuntimeError("DASHSCOPE_API_KEY is not configured")
 
     endpoint = f"{cfg['base_url']}/chat/completions"
-
     user_payload = json.dumps(sentences, ensure_ascii=False)
     user_prompt = f"Translate this JSON array:\n{user_payload}\nReturn JSON array only."
 
     system_prompt = _build_system_prompt(target_lang, source_lang=source_lang)
-    expected_field = target["field"]
+    expected_field = _TARGET_LANG_MAP[target_lang]["field"]
 
     body = {
         "model": cfg["model"],
@@ -105,8 +183,8 @@ async def translate_sentences(sentences: list[str], target_lang: str = "Chinese"
     }
 
     logger.info(
-        "Translate request: %d sentences, model=%s, %s -> %s (field=%s)",
-        len(sentences), cfg["model"], source_lang, target_lang, expected_field,
+        "Translate LLM call: %d sentences, model=%s, %s -> %s",
+        len(sentences), cfg["model"], source_lang, target_lang,
     )
 
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -120,7 +198,13 @@ async def translate_sentences(sentences: list[str], target_lang: str = "Chinese"
     content = result["choices"][0]["message"]["content"]
     logger.info("Translate ok, raw_len=%d", len(content))
 
-    return _parse_translation_response(content, sentences, expected_field, target_lang)
+    return _extract_translation_text(content, sentences, expected_field)
+
+
+def _extract_translation_text(content: str, original_sentences: list[str], expected_field: str) -> list[str]:
+    """Pull just the translation strings from the model's response, aligned with the input."""
+    parsed = _parse_translation_response(content, original_sentences, expected_field)
+    return [p.get(expected_field, "") or "" for p in parsed]
 
 
 def _parse_translation_response(

@@ -27,12 +27,14 @@ from services.asr import transcribe_audio
 from services.subtitle import (
     _fallback_proportional,
     build_subtitles_from_speech_segments,
+    insert_placeholders_for_word_gaps,
     split_sentences_with_timestamps,
 )
 from services.translate import translate_sentences
 from services.voice_service import synthesize as tts_synthesize
 from services.word_tts import synthesize_word
 from services.word_tokenize import is_english_word, lemma, normalize_for_lookup
+from services import ai_service
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -52,6 +54,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    """Log full traceback and return a useful error so we can debug 500s from the browser."""
+    import traceback
+    tb = traceback.format_exc()
+    logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"{type(exc).__name__}: {exc}",
+            "traceback": tb.splitlines()[-12:],
+        },
+    )
+
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
 
@@ -75,11 +93,17 @@ class TranscribeResponse(BaseModel):
     duration: float
     subtitles: list[SubtitleItem]
     raw_text: str
+    aligned: bool = False
+    alignment_source: str = ""  # e.g. "qwen3-forced-aligner" or ""
+    alignment_reason: str = ""
 
 
 class ConfigUpdateRequest(BaseModel):
     DASHSCOPE_API_KEY: Optional[str] = None
     DICT_LANG: Optional[str] = None
+    TRANSLATE_MODEL: Optional[str] = None
+    WORD_LLM_MODEL: Optional[str] = None
+    ASR_MODEL: Optional[str] = None
 
 
 class TranslateSubtitlesRequest(BaseModel):
@@ -138,9 +162,47 @@ class VocabularyAddRequest(BaseModel):
     pos: Optional[str] = ""
     meaning_en: Optional[str] = ""
     meaning_native: Optional[str] = ""
-    native_lang: Optional[str] = "en"
+    native_lang: str = "en"
     example: Optional[dict] = None
     source_history_id: Optional[str] = None
+    roots: Optional[dict] = None
+    etymology_en: Optional[str] = ""
+    etymology_native: Optional[str] = ""
+    family: Optional[list] = None
+    related: Optional[list] = None
+
+
+# AI 助手请求模型
+class AIChatRequest(BaseModel):
+    message: str
+    context: Optional[str] = ""
+    history: Optional[list] = None
+    voice: Optional[str] = "Cherry"
+
+
+class AIExamChatRequest(BaseModel):
+    message: str
+    question: str
+    question_index: int = 0
+    total_questions: int = 1
+    history: Optional[list] = None
+
+
+class AIExamGenerateRequest(BaseModel):
+    subtitles: Optional[list] = None
+    count: int = 3
+    raw_text: Optional[str] = ""
+
+
+class AIExplainRequest(BaseModel):
+    text: str
+    context: Optional[str] = ""
+    # v3: word root / etymology / family / related
+    roots: Optional[dict] = None
+    etymology_en: Optional[str] = ""
+    etymology_native: Optional[str] = ""
+    family: Optional[list] = None
+    related: Optional[list] = None
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +275,13 @@ async def get_config():
     masked = app_config.mask_key(
         app_config.get_all_settings().get("DASHSCOPE_API_KEY", "")
     )
-    return {"has_api_key": has_key, "DASHSCOPE_API_KEY": masked}
+    return {
+        "has_api_key": has_key,
+        "DASHSCOPE_API_KEY": masked,
+        "TRANSLATE_MODEL": app_config.get_setting("TRANSLATE_MODEL", "qwen-turbo"),
+        "WORD_LLM_MODEL": app_config.get_setting("WORD_LLM_MODEL", "qwen-flash"),
+        "ASR_MODEL": app_config.get_setting("ASR_MODEL", "qwen3-asr-flash"),
+    }
 
 
 @app.post("/api/config")
@@ -232,13 +300,36 @@ async def update_config(req: ConfigUpdateRequest):
         app_config.set_setting("DICT_LANG", normalized, persist=True)
         if action == "none":
             action = "saved"
+    if req.TRANSLATE_MODEL is not None:
+        model = req.TRANSLATE_MODEL.strip()
+        if model:
+            app_config.set_setting("TRANSLATE_MODEL", model, persist=True)
+            action = "saved" if action == "none" else action + "+translate_model"
+    if req.WORD_LLM_MODEL is not None:
+        model = req.WORD_LLM_MODEL.strip()
+        if model:
+            app_config.set_setting("WORD_LLM_MODEL", model, persist=True)
+            action = "saved" if action == "none" else action + "+word_llm_model"
+    if req.ASR_MODEL is not None:
+        model = req.ASR_MODEL.strip()
+        if model:
+            app_config.set_setting("ASR_MODEL", model, persist=True)
+            action = "saved" if action == "none" else action + "+asr_model"
     if action == "none":
-        raise HTTPException(400, "DASHSCOPE_API_KEY or DICT_LANG is required")
+        raise HTTPException(400, "At least one of DASHSCOPE_API_KEY, DICT_LANG, TRANSLATE_MODEL, WORD_LLM_MODEL, ASR_MODEL is required")
     has_key = bool(app_config.get_dashscope_api_key())
     masked = app_config.mask_key(
         app_config.get_all_settings().get("DASHSCOPE_API_KEY", "")
     )
-    return {"ok": True, "action": action, "has_api_key": has_key, "DASHSCOPE_API_KEY": masked}
+    return {
+        "ok": True,
+        "action": action,
+        "has_api_key": has_key,
+        "DASHSCOPE_API_KEY": masked,
+        "TRANSLATE_MODEL": app_config.get_setting("TRANSLATE_MODEL", "qwen-turbo"),
+        "WORD_LLM_MODEL": app_config.get_setting("WORD_LLM_MODEL", "qwen-flash"),
+        "ASR_MODEL": app_config.get_setting("ASR_MODEL", "qwen3-asr-flash"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -282,20 +373,37 @@ async def transcribe(
         text = asr_result.get("text", "").strip()
         words = asr_result.get("words", [])
         segments = asr_result.get("segments")
+        classified_segments = asr_result.get("classified_segments")
         real_duration = asr_result.get("duration_ms", 0) / 1000.0
+        # Fallback: if ASR didn’t report duration, measure the file directly
+        if not real_duration:
+            real_duration = _get_real_duration(str(tmp_path)) or get_audio_duration(file_bytes, content_type)
 
         if words:
             items = split_sentences_with_timestamps(words, text, language=language)
+            if items and real_duration > 0:
+                items = insert_placeholders_for_word_gaps(
+                    items,
+                    duration_ms=int(real_duration * 1000),
+                    min_gap_ms=1000,
+                    classified_segments=classified_segments,
+                )
         elif segments and (segments.get("speech") or segments.get("non_speech")):
             items = build_subtitles_from_speech_segments(
                 text,
                 segments.get("speech", []),
                 segments.get("non_speech", []),
                 language=language,
+                classified_segments=classified_segments,
             )
         else:
-            real_duration = _get_real_duration(str(tmp_path)) or get_audio_duration(file_bytes, content_type)
-            items = _fallback_proportional(text, int(real_duration * 1000), language=language)
+            real_duration = real_duration or _get_real_duration(str(tmp_path)) or get_audio_duration(file_bytes, content_type)
+            items = _fallback_proportional(
+                text,
+                int(real_duration * 1000),
+                language=language,
+                non_speech_segments=classified_segments,
+            )
 
         if not items:
             raise HTTPException(400, "No sentences could be extracted")
@@ -311,7 +419,8 @@ async def transcribe(
             trans_map = {i: {"en": items[i]["en"], "zh": ""} for i in translate_indices}
             if en_list:
                 try:
-                    translations = await translate_sentences(en_list)
+                    llm_resp = await translate_sentences(en_list)
+                    translations = llm_resp.get("translations", [])
                     for idx, tr in zip(translate_indices, translations):
                         trans_map[idx] = tr
                 except Exception as e:
@@ -339,6 +448,9 @@ async def transcribe(
             duration=round(duration, 2),
             subtitles=subtitles,
             raw_text=text,
+            aligned=bool(asr_result.get("aligned", False)),
+            alignment_source=str(asr_result.get("alignment_source", "") or ""),
+            alignment_reason=str(asr_result.get("alignment_reason", "") or ""),
         )
     finally:
         try:
@@ -428,9 +540,18 @@ async def _process_online_video(video_url: str, language: str = "en") -> dict:
         words = asr_result.get("words", [])
         segments = asr_result.get("segments")
         real_duration = asr_result.get("duration_ms", 0) / 1000.0
+        # Fallback: if ASR didn’t report duration, measure the file directly
+        if not real_duration:
+            real_duration = _get_real_duration(str(mp3_path))
 
         if words:
             items = split_sentences_with_timestamps(words, text, language=language)
+            if items and real_duration > 0:
+                items = insert_placeholders_for_word_gaps(
+                    items,
+                    duration_ms=int(real_duration * 1000),
+                    min_gap_ms=1000,
+                )
         elif segments and (segments.get("speech") or segments.get("non_speech")):
             items = build_subtitles_from_speech_segments(
                 text,
@@ -451,7 +572,8 @@ async def _process_online_video(video_url: str, language: str = "en") -> dict:
             trans_map = {i: {"en": items[i]["en"], "zh": ""} for i in translate_indices}
             if en_list:
                 try:
-                    translations = await translate_sentences(en_list)
+                    llm_resp = await translate_sentences(en_list)
+                    translations = llm_resp.get("translations", [])
                     for idx, tr in zip(translate_indices, translations):
                         trans_map[idx] = tr
                 except Exception as e:
@@ -481,6 +603,9 @@ async def _process_online_video(video_url: str, language: str = "en") -> dict:
             "raw_text": text,
             "source": "ai_recognition",
             "source_lang": language,
+            "aligned": bool(asr_result.get("aligned", False)),
+            "alignment_source": str(asr_result.get("alignment_source", "") or ""),
+            "alignment_reason": str(asr_result.get("alignment_reason", "") or ""),
         }
     finally:
         for p in (tmp_path, mp3_path):
@@ -505,6 +630,36 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
             subtitles = result["subtitles"]
             if not subtitles:
                 raise HTTPException(400, "This video has no subtitles. Try another video or upload an SRT file.")
+
+            # YouTube returns only spoken-line cues. Inject placeholder items for
+            # the silent gaps (music / applause / black frames) so they show up
+            # as clickable empty entries in the subtitle list.
+            yt_duration = result.get("duration")
+            if not yt_duration or yt_duration <= 0:
+                yt_duration = subtitles[-1]["end"] if subtitles else 0
+            if subtitles and yt_duration > 0:
+                subs_ms = [
+                    {
+                        "start": int(s.get("start", 0) * 1000),
+                        "end": int(s.get("end", 0) * 1000),
+                        "en": s.get("en", ""),
+                    }
+                    for s in subtitles
+                ]
+                with_ph_ms = insert_placeholders_for_word_gaps(
+                    subs_ms,
+                    duration_ms=int(yt_duration * 1000),
+                    min_gap_ms=1000,
+                )
+                subtitles = [
+                    {
+                        "start": round(it["start"] / 1000.0, 3),
+                        "end": round(it["end"] / 1000.0, 3),
+                        "en": it.get("en", ""),
+                        "is_placeholder": bool(it.get("is_placeholder", False)),
+                    }
+                    for it in with_ph_ms
+                ]
 
             for s in subtitles:
                 s["zh"] = ""
@@ -576,13 +731,14 @@ async def translate_subtitles_api(req: TranslateSubtitlesRequest):
     field = _TARGET_LANG_MAP[target_lang]["field"]
 
     try:
-        translations = await translate_sentences(
+        llm_resp = await translate_sentences(
             sentences, target_lang=target_lang, source_lang=req.source_lang or "en"
         )
     except Exception as e:
         logger.exception("Translation failed")
         raise HTTPException(500, f"Translation failed: {e}")
 
+    translations = llm_resp.get("translations", [])
     outputs = [t.get(field, "") if isinstance(t, dict) else "" for t in translations]
     estimated_tokens = _estimate_tokens(sentences) + _estimate_tokens(outputs)
 
@@ -604,6 +760,10 @@ async def translate_subtitles_api(req: TranslateSubtitlesRequest):
         "target_lang": target_lang,
         "field": field,
         "estimated_tokens": estimated_tokens,
+        "model": llm_resp.get("model", ""),
+        "cache_hits": llm_resp.get("cache_hits", 0),
+        "llm_calls": llm_resp.get("llm_calls", 0),
+        "elapsed_s": llm_resp.get("elapsed_s", 0),
         "quota": {
             "total_quota": total_quota,
             "used_tokens": current_used + estimated_tokens,
@@ -950,6 +1110,11 @@ async def vocabulary_add(req: VocabularyAddRequest):
             "native_lang": native_lang,
             "example": req.example,
             "source_history_id": req.source_history_id,
+            "roots": req.roots,
+            "etymology_en": req.etymology_en,
+            "etymology_native": req.etymology_native,
+            "family": req.family,
+            "related": req.related,
         })
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -973,6 +1138,354 @@ async def vocabulary_check(word: str):
     from urllib.parse import unquote
     decoded = unquote(word).strip()
     return {"word": decoded, "saved": vocab_service.has_word(decoded)}
+
+
+# ---------------------------------------------------------------------------
+# AI 助手 (chat / exam / explain / generate)
+# ---------------------------------------------------------------------------
+@app.get("/api/ai/health")
+async def ai_health():
+    return ai_service.health()
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(req: AIChatRequest):
+    message = (req.message or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+    try:
+        result = await ai_service.chat(
+            message=message,
+            context=req.context or "",
+            history=req.history,
+            voice=req.voice or "Cherry",
+        )
+        return {"ok": True, **result}
+    except RuntimeError as e:
+        msg = str(e)
+        if "DASHSCOPE_API_KEY" in msg:
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, f"AI chat failed: {msg}")
+    except Exception as e:
+        logger.exception("[ai/chat] failed")
+        raise HTTPException(500, f"AI chat error: {e}")
+
+
+@app.post("/api/ai/exam")
+async def ai_exam_chat(req: AIExamChatRequest):
+    message = (req.message or "").strip()
+    question = (req.question or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+    if not question:
+        raise HTTPException(400, "question is required")
+    try:
+        result = await ai_service.exam_chat(
+            message=message,
+            question=question,
+            question_index=max(0, req.question_index),
+            total_questions=max(1, req.total_questions),
+            history=req.history,
+        )
+        return {"ok": True, **result}
+    except RuntimeError as e:
+        msg = str(e)
+        if "DASHSCOPE_API_KEY" in msg:
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, f"AI exam failed: {msg}")
+    except Exception as e:
+        logger.exception("[ai/exam] failed")
+        raise HTTPException(500, f"AI exam error: {e}")
+
+
+@app.post("/api/ai/exam/generate")
+async def ai_exam_generate(req: AIExamGenerateRequest):
+    subtitles = req.subtitles or []
+    # 若没传 subtitles 但传了 raw_text, 拆成单句列表
+    if not subtitles and req.raw_text:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", req.raw_text) if s.strip()]
+        subtitles = [{"en": s} for s in sentences]
+    try:
+        result = await ai_service.generate_exam_questions(
+            subtitles=subtitles,
+            count=max(1, min(10, req.count)),
+        )
+        return {"ok": True, **result}
+    except RuntimeError as e:
+        msg = str(e)
+        if "DASHSCOPE_API_KEY" in msg:
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, f"AI generate failed: {msg}")
+    except Exception as e:
+        logger.exception("[ai/exam/generate] failed")
+        raise HTTPException(500, f"AI generate error: {e}")
+
+
+@app.post("/api/ai/explain")
+async def ai_explain(req: AIExplainRequest):
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+    try:
+        result = await ai_service.explain(text=text, context=req.context or "")
+        return {"ok": True, **result}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        if "DASHSCOPE_API_KEY" in msg:
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, f"AI explain failed: {msg}")
+    except Exception as e:
+        logger.exception("[ai/explain] failed")
+        raise HTTPException(500, f"AI explain error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# AI Voice Chat (ASR → AI → TTS)
+# ---------------------------------------------------------------------------
+@app.post("/api/ai/voice-chat")
+async def ai_voice_chat(
+    audio: UploadFile = File(...),
+    context: str = Form(""),
+    history: str = Form("[]"),
+    language: str = Form("en"),
+    voice: str = Form("Cherry"),
+):
+    """Voice conversation: ASR → AI chat → TTS.
+    
+    Receives audio file, transcribes it, sends to AI, returns AI text + audio reply.
+    """
+    if not app_config.is_dashscope_configured():
+        raise HTTPException(401, "DashScope API key is not configured")
+    
+    try:
+        # Read audio file
+        file_bytes = await audio.read()
+        if not file_bytes:
+            raise HTTPException(400, "Audio file is empty")
+        
+        filename = audio.filename or "audio.webm"
+        content_type = audio.content_type or "audio/webm"
+        
+        # 1. ASR: Convert speech to text
+        logger.info("[voice-chat] ASR started: %s, %d bytes", filename, len(file_bytes))
+        asr_result = await transcribe_audio(file_bytes, filename, content_type, language=language)
+        
+        if not asr_result or not asr_result.get("text"):
+            raise HTTPException(400, "Could not transcribe audio. Please speak clearly and try again.")
+        
+        user_text = asr_result["text"]
+        logger.info("[voice-chat] ASR result: %s", user_text[:100])
+        
+        # 2. AI Chat: Process the transcribed text
+        history_list = json.loads(history) if history else []
+        ai_result = await ai_service.chat(
+            message=user_text,
+            context=context,
+            history=history_list,
+            voice=voice,
+        )
+        
+        # 3. Return text + audio (already generated by ai_service.chat)
+        return {
+            "ok": True,
+            "transcription": user_text,
+            "reply": ai_result["reply"],
+            "audio": ai_result.get("audio", ""),
+            "model": ai_result.get("model", ""),
+            "asr_duration": asr_result.get("duration", 0),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("[voice-chat] failed")
+        raise HTTPException(500, f"Voice chat failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# AI Video Test
+# ---------------------------------------------------------------------------
+class VideoTestRequest(BaseModel):
+    subtitles: str
+    previous_question: Optional[str] = ""
+    user_answer: Optional[str] = ""
+    history: Optional[list] = None
+    voice: Optional[str] = "Cherry"
+
+@app.post("/api/ai/video-test")
+async def ai_video_test(req: VideoTestRequest):
+    """Video comprehension test based on subtitles."""
+    if not app_config.is_dashscope_configured():
+        raise HTTPException(401, "DashScope API key is not configured")
+    
+    try:
+        result = await ai_service.video_test(
+            subtitles=req.subtitles,
+            previous_question=req.previous_question or "",
+            user_answer=req.user_answer or "",
+            history=req.history,
+            voice=req.voice or "Cherry",
+        )
+        return {"ok": True, **result}
+    except RuntimeError as e:
+        msg = str(e)
+        if "DASHSCOPE_API_KEY" in msg:
+            raise HTTPException(401, "DashScope API key is not configured")
+        raise HTTPException(502, f"AI video test failed: {msg}")
+    except Exception as e:
+        logger.exception("[ai/video-test] failed")
+        raise HTTPException(500, f"AI video test error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Cache stats & cost estimate
+# ---------------------------------------------------------------------------
+@app.get("/api/cache/stats")
+async def cache_stats_endpoint():
+    from services import sentence_cache as sc
+    return {
+        "dict_cache": dict_service.cache_stats(),
+        "trans_cache": sc.stats(),
+        "tts_cache": {
+            "disk_files": _count_tts_cache(),
+        },
+    }
+
+
+def _count_tts_cache() -> int:
+    try:
+        from services.voice_service import TTS_CACHE_DIR
+        return len(list(TTS_CACHE_DIR.glob("*.mp3")))
+    except Exception:
+        return 0
+
+
+@app.post("/api/cache/clear")
+async def cache_clear(target: str = "trans"):
+    """Clear a specific cache. target ∈ {trans, dict, tts, all}."""
+    target = (target or "trans").lower()
+    cleared = {"trans": 0, "dict": 0, "tts": 0}
+    if target in ("trans", "all"):
+        from services import sentence_cache as sc
+        cleared["trans"] = sc.clear()
+    if target in ("dict", "all"):
+        try:
+            from services.dictionary import CACHE_DIR
+            for fp in CACHE_DIR.glob("*.json"):
+                try:
+                    fp.unlink()
+                    cleared["dict"] += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    if target in ("tts", "all"):
+        try:
+            from services.voice_service import TTS_CACHE_DIR
+            for fp in TTS_CACHE_DIR.glob("*"):
+                try:
+                    fp.unlink()
+                    cleared["tts"] += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return {"ok": True, "cleared": cleared, "target": target}
+
+
+@app.get("/api/cost/estimate")
+async def cost_estimate():
+    """Estimate the savings gained by using turbo+flash instead of qwen-plus,
+    based on current cache sizes and assumed workload."""
+    from services import sentence_cache as sc
+    # DashScope public pricing (CNY / 1k tokens) — checked 2024
+    pricing = {
+        "qwen-plus":  {"input": 0.004,  "output": 0.012,  "speed_tps": 70},
+        "qwen-turbo": {"input": 0.003,  "output": 0.006,  "speed_tps": 150},
+        "qwen-flash": {"input": 0.0005, "output": 0.002,  "speed_tps": 250},
+    }
+    current_translate = app_config.get_setting("TRANSLATE_MODEL", "qwen-turbo")
+    current_word = app_config.get_setting("WORD_LLM_MODEL", "qwen-flash")
+
+    # Heuristics: 1 video/day (100 sentences) + 10 word lookups/day (2 L1-miss)
+    workload = {
+        "subtitle_sentences_per_day": 100,
+        "word_lookups_per_day": 10,
+        "l1_miss_rate": 0.20,
+    }
+
+    def est(model: str, inp: int, out: int) -> dict:
+        p = pricing.get(model, pricing["qwen-plus"])
+        in_cost = inp * p["input"] / 1000
+        out_cost = out * p["output"] / 1000
+        return {
+            "cost_cny": round(in_cost + out_cost, 6),
+            "latency_s": round(out / max(p["speed_tps"], 1), 2),
+        }
+
+    # Cost with qwen-plus everywhere (the OLD baseline)
+    plus_subtitle = est("qwen-plus", 2200, 1000)
+    plus_word_miss = est("qwen-plus", 200, 180)
+    plus_word_xlate = est("qwen-plus", 250, 120)
+    plus_daily = (
+        plus_subtitle["cost_cny"]
+        + (workload["word_lookups_per_day"] * workload["l1_miss_rate"]) * plus_word_miss["cost_cny"]
+        + (workload["word_lookups_per_day"] * (1 - workload["l1_miss_rate"])) * plus_word_xlate["cost_cny"]
+    )
+    plus_latency = (
+        plus_subtitle["latency_s"]
+        + (workload["word_lookups_per_day"] * workload["l1_miss_rate"]) * plus_word_miss["latency_s"]
+        + (workload["word_lookups_per_day"] * (1 - workload["l1_miss_rate"])) * plus_word_xlate["latency_s"]
+    )
+
+    # Cost with current (configurable) models
+    cur_subtitle = est(current_translate, 2200, 1000)
+    cur_word_miss = est(current_word, 200, 180)
+    cur_word_xlate = est(current_word, 250, 120)
+    cur_daily = (
+        cur_subtitle["cost_cny"]
+        + (workload["word_lookups_per_day"] * workload["l1_miss_rate"]) * cur_word_miss["cost_cny"]
+        + (workload["word_lookups_per_day"] * (1 - workload["l1_miss_rate"])) * cur_word_xlate["cost_cny"]
+    )
+    cur_latency = (
+        cur_subtitle["latency_s"]
+        + (workload["word_lookups_per_day"] * workload["l1_miss_rate"]) * cur_word_miss["latency_s"]
+        + (workload["word_lookups_per_day"] * (1 - workload["l1_miss_rate"])) * cur_word_xlate["latency_s"]
+    )
+
+    trans_cache = sc.stats()
+    # Rough estimate: every cached sentence in trans_cache represents one saved LLM call.
+    # We count that as one equivalent subtitle-translation call (avg tokens).
+    per_saved_call_cost = cur_subtitle["cost_cny"] / max(workload["subtitle_sentences_per_day"], 1)
+    cumulative_savings = round(trans_cache["disk_files"] * per_saved_call_cost, 4)
+
+    return {
+        "workload": workload,
+        "current_models": {
+            "TRANSLATE_MODEL": current_translate,
+            "WORD_LLM_MODEL": current_word,
+        },
+        "baseline_qwen_plus": {
+            "daily_cost_cny": round(plus_daily, 4),
+            "daily_latency_s": round(plus_latency, 1),
+            "monthly_cost_cny": round(plus_daily * 30, 2),
+        },
+        "current_setup": {
+            "daily_cost_cny": round(cur_daily, 4),
+            "daily_latency_s": round(cur_latency, 1),
+            "monthly_cost_cny": round(cur_daily * 30, 2),
+        },
+        "savings": {
+            "daily_cny": round(plus_daily - cur_daily, 4),
+            "monthly_cny": round((plus_daily - cur_daily) * 30, 2),
+            "daily_latency_s": round(plus_latency - cur_latency, 1),
+            "speedup_x": round(plus_daily / max(cur_daily, 0.0001), 1),
+        },
+        "trans_cache": trans_cache,
+        "cumulative_savings_from_cache_cny": cumulative_savings,
+    }
 
 
 # ---------------------------------------------------------------------------

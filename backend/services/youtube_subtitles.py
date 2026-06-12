@@ -385,6 +385,7 @@ def fetch_via_ytdlp(video_url: str) -> dict:
             "is_auto_generated": is_auto,
             "raw_text": full_text,
             "source": source,
+            "duration": float(info.get("duration") or 0) or None,
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -472,6 +473,7 @@ def _build_from_raw(raw: list, is_auto: bool, source: str, language: str) -> dic
         "is_auto_generated": is_auto,
         "raw_text": full_text,
         "source": source,
+        "duration": None,
     }
 
 

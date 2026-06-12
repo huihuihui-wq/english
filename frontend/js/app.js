@@ -54,25 +54,8 @@ const App = (() => {
 
   function applySettings() {
     setActiveSpeed(settings.speed);
-    document.getElementById("loopCount").textContent = settings.loopCount;
-    document.getElementById("pauseCount").textContent = settings.pauseSec;
-    document.getElementById("delayCount").textContent = settings.delaySec || 0;
-    document.getElementById("autoReplay").checked = settings.autoReplay;
     const transSel = document.getElementById("showTranslation");
     if (transSel && settings.targetLang) transSel.value = settings.targetLang;
-    Shadow.setLoopCount(settings.loopCount);
-    Shadow.setPauseSec(settings.pauseSec);
-    Shadow.setDelaySec(settings.delaySec || 0);
-    Shadow.setEnabled(settings.autoReplay);
-    updateShadowControlsState();
-  }
-
-  function updateShadowControlsState() {
-    const controls = document.getElementById("shadowControls");
-    if (!controls) return;
-    const enabled = settings.autoReplay;
-    controls.classList.toggle("disabled", !enabled);
-    console.log(`[Shadow mode] ${enabled ? "enabled" : "disabled (loop/pause buttons grayed out)"}`);
   }
 
   function initQuotaWidget() {
@@ -96,87 +79,6 @@ const App = (() => {
       Storage.save(settings);
       setActiveSpeed(rate);
       Player.setRate(rate);
-    });
-
-    function ensureAutoReplay() {
-      if (!settings.autoReplay) {
-        settings.autoReplay = true;
-        document.getElementById("autoReplay").checked = true;
-        Shadow.setEnabled(true);
-        Storage.save(settings);
-        updateShadowControlsState();
-        console.log("[Shadow mode] auto-enabled");
-      }
-    }
-
-    document.getElementById("loopPlus").addEventListener("click", () => {
-      const v = Math.min(10, settings.loopCount + 1);
-      settings.loopCount = v;
-      Shadow.setLoopCount(v);
-      document.getElementById("loopCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-    document.getElementById("loopMinus").addEventListener("click", () => {
-      const v = Math.max(1, settings.loopCount - 1);
-      settings.loopCount = v;
-      Shadow.setLoopCount(v);
-      document.getElementById("loopCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-
-    document.getElementById("pausePlus").addEventListener("click", () => {
-      const v = Math.min(10, settings.pauseSec + 1);
-      settings.pauseSec = v;
-      Shadow.setPauseSec(v);
-      document.getElementById("pauseCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-    document.getElementById("pauseMinus").addEventListener("click", () => {
-      const v = Math.max(0, settings.pauseSec - 1);
-      settings.pauseSec = v;
-      Shadow.setPauseSec(v);
-      document.getElementById("pauseCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-
-    // Delay shadowing controls
-    document.getElementById("delayPlus").addEventListener("click", () => {
-      const v = Math.min(5, (settings.delaySec || 0) + 1);
-      settings.delaySec = v;
-      Shadow.setDelaySec(v);
-      document.getElementById("delayCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-    document.getElementById("delayMinus").addEventListener("click", () => {
-      const v = Math.max(0, (settings.delaySec || 0) - 1);
-      settings.delaySec = v;
-      Shadow.setDelaySec(v);
-      document.getElementById("delayCount").textContent = v;
-      Storage.save(settings);
-      ensureAutoReplay();
-    });
-
-    document.getElementById("autoReplay").addEventListener("change", (e) => {
-      settings.autoReplay = e.target.checked;
-      Shadow.setEnabled(e.target.checked);
-      Storage.save(settings);
-      updateShadowControlsState();
-      console.log(`[Shadow mode] toggled: ${e.target.checked ? "on" : "off"}`);
-      if (e.target.checked) {
-        const subs = Player.getSubtitles();
-        if (subs.length > 0) {
-          const startIdx = Math.max(0, Player.getCurrent());
-          Shadow.start(startIdx);
-          console.log(`[Shadow mode] auto-loop from sentence ${startIdx + 1}`);
-        } else {
-          console.log(`[Shadow mode] no subtitles available yet`);
-        }
-      }
     });
 
     async function ensureSubtitleTranslations(targetLang) {
@@ -380,21 +282,23 @@ const App = (() => {
     }
     loadTranslationTargets();
 
-    document.getElementById("showTranslation").addEventListener("change", async (e) => {
-      const targetLang = e.target.value;
-      settings.targetLang = targetLang;
-      Storage.save(settings);
+    const showTransEl = document.getElementById("showTranslation");
+    if (showTransEl) {
+      showTransEl.addEventListener("change", async (e) => {
+        const targetLang = e.target.value;
+        settings.targetLang = targetLang;
+        Storage.save(settings);
 
-      if (targetLang) {
-        await ensureSubtitleTranslations(targetLang);
-      } else {
-        if (window.Player && Player.setTranslationField) Player.setTranslationField("");
-        Player.reRenderSubtitles();
-      }
-    });
+        if (targetLang) {
+          await ensureSubtitleTranslations(targetLang);
+        } else {
+          if (window.Player && Player.setTranslationField) Player.setTranslationField("");
+          Player.reRenderSubtitles();
+        }
+      });
+    }
 
     document.getElementById("reloadBtn").addEventListener("click", () => {
-      Shadow.abort();
       Player.pause();
       document.body.classList.remove("playing");
       document.getElementById("uploader").scrollIntoView({ behavior: "smooth" });
@@ -407,17 +311,35 @@ const App = (() => {
       if (window.AppState) window.AppState.currentSourceLang = firstSub.source_lang || "en";
       Player.loadFile(file, data);
       Player.setRate(settings.speed);
-      if (settings.autoReplay) {
-        setTimeout(() => Shadow.start(0), 500);
-      }
+      updateAlignmentBadge(data);
     });
+
+    window.addEventListener("link:subtitles-loaded", (e) => {
+      const data = e.detail || {};
+      if (data) updateAlignmentBadge(data);
+    });
+
+    function updateAlignmentBadge(data) {
+      const badge = document.getElementById("alignmentBadge");
+      if (!badge) return;
+      if (data.aligned) {
+        badge.hidden = false;
+        const isWav2Vec2 = data.alignment_source === "wav2vec2-ctc";
+        badge.textContent = isWav2Vec2 ? "🎙️ wav2vec2 对齐" : "✓ 已对齐";
+        badge.className = "alignment-badge aligned";
+        badge.title = data.alignment_source
+          ? `对齐源: ${data.alignment_source}\n词级时间戳由本地 CTC 模型生成`
+          : "已对齐";
+      } else {
+        badge.hidden = true;
+      }
+    }
 
     document.getElementById("subtitleList").addEventListener("click", (e) => {
       const li = e.target.closest(".sub-item");
       if (!li) return;
       const idx = parseInt(li.dataset.idx, 10);
       Player.jumpToSentence(idx);
-      Shadow.onUserJump(idx);
     });
 
     const mainTabs = document.getElementById("mainTabs");
@@ -446,8 +368,12 @@ const App = (() => {
     document.querySelectorAll(".tab-panel").forEach((panel) => {
       panel.classList.toggle("hidden", panel.id !== "tab-" + tabName);
     });
+    document.body.classList.toggle("tab-ai-active", tabName === "ai");
     if (tabName === "vocab" && window.Vocab && typeof window.Vocab.load === "function") {
       window.Vocab.load();
+    }
+    if (tabName === "ai" && window.AIAssistant && typeof window.AIAssistant.openPanel === "function") {
+      window.AIAssistant.openPanel();
     }
   }
 
@@ -468,12 +394,10 @@ const App = (() => {
       case "ArrowLeft":
         e.preventDefault();
         Player.goPrev();
-        Shadow.onUserJump(Player.getCurrent());
         break;
       case "ArrowRight":
         e.preventDefault();
         Player.goNext();
-        Shadow.onUserJump(Player.getCurrent());
         break;
       case "r":
       case "R":
@@ -531,9 +455,6 @@ const App = (() => {
       }
       if (window.History) {
         try { window.History.currentId = rec.id; } catch (e) {}
-      }
-      if (settings.autoReplay) {
-        setTimeout(() => Shadow.start(0), 500);
       }
       input.removeEventListener("change", reselectHandler);
       reselectHandler = null;

@@ -2,9 +2,9 @@
 
 Single file: backend/data/vocabulary.json
 
-Schema (v2):
+Schema (v3):
 {
-  "version": 2,
+  "version": 3,
   "words": [
     {
       "word": "ephemeral",
@@ -17,7 +17,14 @@ Schema (v2):
       "example": {"en": "...", "native": "..."} | null,
       "source_history_id": "abc123" | null,
       "added_at": "...",
-      "updated_at": "..."
+      "updated_at": "...",
+
+      // v3 additions (all optional, default empty)
+      "roots": {"prefix": "e-", "root": "phemera", "suffix": "-al"} | null,
+      "etymology_en": "From Greek ephēmeros 'lasting only a day'..." | "",
+      "etymology_native": "源自希腊语..." | "",
+      "family": ["ephemeral", "ephemerality", "ephemerally", "ephemeron"],
+      "related": [{"word": "ephemerality", "pos": "noun", "gloss_en": "..."}]
     }
   ]
 }
@@ -40,8 +47,11 @@ VOCAB_FILE = DATA_DIR / "vocabulary.json"
 _lock = threading.RLock()
 _cache: Optional[dict] = None
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_NATIVE_LANG = "en"
+
+# v3 optional fields — added with safe defaults during migration
+_V3_FIELDS = ("roots", "etymology_en", "etymology_native", "family", "related")
 
 
 def _now_iso() -> str:
@@ -49,19 +59,31 @@ def _now_iso() -> str:
 
 
 def _migrate(record: dict) -> dict:
-    """Migrate a v1 record (meaning_zh) to v2 (meaning_native + native_lang)."""
-    if "meaning_native" in record or "native_lang" in record:
-        return record
+    """Migrate older records forward. Idempotent."""
     out = dict(record)
-    zh = out.pop("meaning_zh", "") or ""
-    out["meaning_native"] = zh
-    out["native_lang"] = "zh"
+    # v1 -> v2: meaning_zh -> meaning_native + native_lang
+    if "meaning_native" not in out and "meaning_native" not in out:
+        if "meaning_zh" in out:
+            zh = out.pop("meaning_zh", "") or ""
+            out["meaning_native"] = zh
+            out["native_lang"] = "zh"
+    if "native_lang" not in out:
+        out["native_lang"] = "zh"
     example = out.get("example")
     if isinstance(example, dict):
         ex2 = dict(example)
         if "zh" in ex2 and "native" not in ex2:
             ex2["native"] = ex2.pop("zh")
         out["example"] = ex2
+    # v2 -> v3: ensure new root/etymology/family/related fields exist
+    for k in _V3_FIELDS:
+        if k not in out:
+            if k == "roots":
+                out[k] = {"prefix": "", "root": "", "suffix": ""}
+            elif k in ("family", "related"):
+                out[k] = []
+            else:
+                out[k] = ""
     return out
 
 
@@ -148,7 +170,10 @@ def add_word(entry: dict) -> dict:
             if (existing.get("word") or "").strip().lower() == word.lower():
                 for k in ("lemma", "phonetic", "pos", "meaning_en",
                           "meaning_native", "native_lang", "example",
-                          "source_history_id"):
+                          "source_history_id",
+                          # v3 fields
+                          "roots", "etymology_en", "etymology_native",
+                          "family", "related"):
                     if k in entry and entry[k] is not None:
                         existing[k] = entry[k]
                 existing["updated_at"] = now
@@ -167,6 +192,11 @@ def add_word(entry: dict) -> dict:
             "source_history_id": entry.get("source_history_id") or None,
             "added_at": now,
             "updated_at": now,
+            "roots": entry.get("roots") or {"prefix": "", "root": "", "suffix": ""},
+            "etymology_en": entry.get("etymology_en") or "",
+            "etymology_native": entry.get("etymology_native") or "",
+            "family": list(entry.get("family") or []),
+            "related": list(entry.get("related") or []),
         }
         _cache["words"].append(record)
         _flush()

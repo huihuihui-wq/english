@@ -3,11 +3,12 @@ const STORAGE_KEY = "shadow-reader.settings.v1";
 
 const DEFAULT_SETTINGS = {
   speed: 1,
-  loopCount: 3,
-  pauseSec: 2,
+  loopCount: 1,
+  pauseSec: 0,
+  delaySec: 0,
   autoReplay: false,
-  showZh: false,
-  nativeLang: "en", // user's native language for dictionary lookups
+  targetLang: "",
+  subtitleOffset: 0,
 };
 
 const Storage = {

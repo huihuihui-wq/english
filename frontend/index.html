@@ -3,23 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Shadow Reader</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=2" />
+  <title>Shadow Reader - Green Neumorphism</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+  <link rel="stylesheet" href="/static/css/style.css?v=3" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">🎧</span>
+      <span class="logo">🌿</span>
       <span class="title">Shadow Reader</span>
       <span class="subtitle">AI-powered shadowing practice</span>
     </div>
     <div class="topbar-right">
-      <label class="topbar-lang" title="Native language for word definitions">
-        <span class="topbar-lang-icon">🌐</span>
-        <select id="nativeLangSel" class="topbar-lang-sel">
-          <option value="en">English</option>
-        </select>
-      </label>
       <button id="quotaBtn" class="btn" title="View token consumption in DashScope Console" onclick="window.open('https://bailian.console.aliyun.com/?tab=model#/model-usage/free-quota', '_blank', 'noopener')">
         💰 Usage
       </button>
@@ -33,6 +28,7 @@
     <button class="tab-btn" data-tab="tts">🎙 TTS Test</button>
     <button class="tab-btn" data-tab="history">📚 History</button>
     <button class="tab-btn" data-tab="vocab">📖 Vocabulary</button>
+    <button class="tab-btn" data-tab="ai">🤖 AI Coach</button>
   </nav>
 
   <main class="container">
@@ -158,42 +154,6 @@
                 <button class="speed-btn" data-rate="2">2x</button>
               </div>
             </div>
-
-            <div class="control-row shadow-controls" id="shadowControls">
-              <div class="control-item shadow-mode-toggle">
-                <label class="toggle toggle-highlight">
-                  <input type="checkbox" id="autoReplay" />
-                  <span>🎯 Shadowing Mode</span>
-                </label>
-              </div>
-              <div class="control-item">
-                <span class="control-label" title="How many times to repeat each sentence">Loops</span>
-                <button class="btn step" id="loopMinus">−</button>
-                <span class="value" id="loopCount">3</span>
-                <button class="btn step" id="loopPlus">+</button>
-                <span class="unit">times</span>
-              </div>
-              <div class="control-item">
-                <span class="control-label" title="Delay before replaying the same sentence (echoic shadowing)">Delay</span>
-                <button class="btn step" id="delayMinus">−</button>
-                <span class="value" id="delayCount">0</span>
-                <button class="btn step" id="delayPlus">+</button>
-                <span class="unit">sec</span>
-              </div>
-              <div class="control-item">
-                <span class="control-label" title="Pause before moving to next sentence">Gap</span>
-                <button class="btn step" id="pauseMinus">−</button>
-                <span class="value" id="pauseCount">2</span>
-                <button class="btn step" id="pausePlus">+</button>
-                <span class="unit">sec</span>
-              </div>
-              <div class="control-item translation-control">
-                <label class="control-label" for="showTranslation">Translation</label>
-                <select id="showTranslation" class="translation-select">
-                  <option value="">None</option>
-                </select>
-              </div>
-            </div>
           </section>
 
           <section id="subtitleCard" class="card subtitle-card">
@@ -203,7 +163,23 @@
                 <span class="dot active"></span>Current
                 <span class="dot done"></span>Done
                 <span class="dot"></span>Pending
+                <span class="dot placeholder"></span>Silent
+                <span id="alignmentBadge" class="alignment-badge" hidden>✨ Qwen3</span>
+                <span class="sub-header-hint">右键重设时间</span>
               </div>
+              <label class="auto-follow-toggle" title="Auto-scroll subtitle list to current sentence">
+                <input type="checkbox" id="autoFollowToggle" checked />
+                <span>Auto-follow</span>
+              </label>
+              <div class="translation-control">
+                <select id="showTranslation" class="translation-select">
+                  <option value="">No translation</option>
+                </select>
+              </div>
+            </div>
+            <div class="current-translation" id="currentTranslation" hidden>
+              <div class="current-translation-label">Translation</div>
+              <div class="current-translation-text" id="currentTranslationText"></div>
             </div>
             <ol class="subtitle-list" id="subtitleList"></ol>
           </section>
@@ -213,27 +189,7 @@
         </div>
       </div>
 
-      <section class="card help-card">
-        <h3>Keyboard Shortcuts &amp; Shadowing Guide</h3>
-        <div class="kbd-grid">
-          <div><kbd>Space</kbd> Play / Pause</div>
-          <div><kbd>←</kbd> / <kbd>→</kbd> Previous / Next sentence</div>
-          <div><kbd>R</kbd> Replay current sentence</div>
-          <div><kbd>1</kbd>-<kbd>6</kbd> Change speed (0.5/0.75/1/1.25/1.5/2)</div>
-          <div><kbd>0</kbd> Reset to 1x</div>
-          <div><kbd>Click subtitle</kbd> Jump to sentence</div>
-        </div>
-        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 13px; line-height: 1.6;">
-          <strong style="color: var(--text);">Shadowing Tips:</strong>
-          <ol style="margin-top: 8px; padding-left: 18px;">
-            <li><strong>Loops</strong> — Set how many times each sentence repeats</li>
-            <li><strong>Delay</strong> — Add a pause before replaying the same sentence (echoic shadowing)</li>
-            <li><strong>Gap</strong> — Pause before moving to the next sentence</li>
-            <li>Start with <strong>0.75x speed</strong> and <strong>1-2 loops</strong>, then increase speed</li>
-            <li>Use <strong>Delay &gt; 0</strong> for echoic memory training (shadowing after a short pause)</li>
-          </ol>
-        </div>
-      </section>
+
     </div>
     <!-- /Tab: Shadowing -->
 
@@ -261,12 +217,13 @@
             <p class="vocab-sub" id="vocabSub">Loading…</p>
           </div>
           <div class="vocab-actions">
+            <div class="vocab-stats" id="vocabStats"></div>
             <input type="search" id="vocabSearch" class="vocab-search" placeholder="Search words…" autocomplete="off" />
             <button class="btn ghost" id="vocabExportBtn" title="Export JSON">⬇ Export</button>
             <button class="btn ghost" id="vocabRefreshBtn" title="Refresh">↻ Refresh</button>
           </div>
         </div>
-        <div id="vocabList" class="vocab-list">
+        <div id="vocabList" class="vocab-grid">
           <div class="vocab-empty">No saved words yet. Click any word in a subtitle to look it up and save.</div>
         </div>
       </section>
@@ -328,6 +285,48 @@
       </section>
     </div>
     <!-- /Tab: TTS -->
+
+    <!-- Tab: AI Coach -->
+    <div id="tab-ai" class="tab-panel hidden">
+      <section class="card ai-tab-intro">
+        <div class="ai-intro-header">
+          <div class="ai-intro-icon">🤖</div>
+          <div>
+            <h2 style="font-size:18px; margin:0 0 4px;">AI 口语教练</h2>
+            <p class="ai-intro-sub">按住右侧按钮开始语音对话 · 也能用文字聊天</p>
+          </div>
+        </div>
+
+        <div class="ai-intro-grid">
+          <div class="ai-intro-card">
+            <div class="ai-intro-card-icon">🎙️</div>
+            <div class="ai-intro-card-title">语音对话</div>
+            <div class="ai-intro-card-desc">按住右侧抽屉的麦克风按钮,直接用英语与 AI 教练对话,自动用语音回复</div>
+          </div>
+          <div class="ai-intro-card">
+            <div class="ai-intro-card-icon">⌨️</div>
+            <div class="ai-intro-card-title">文字聊天</div>
+            <div class="ai-intro-card-desc">不方便说话时,点击 ⌨️ 切换到文字输入</div>
+          </div>
+          <div class="ai-intro-card">
+            <div class="ai-intro-card-icon">📺</div>
+            <div class="ai-intro-card-title">视频测试模式</div>
+            <div class="ai-intro-card-desc">基于当前视频字幕,让 AI 提问,你来回答,练习听力和口语</div>
+          </div>
+          <div class="ai-intro-card">
+            <div class="ai-intro-card-icon">🤖</div>
+            <div class="ai-intro-card-title">字幕提问</div>
+            <div class="ai-intro-card-desc">在 Shadowing 标签的字幕行点击 <code>🤖 问AI</code>,AI 会解释该句</div>
+          </div>
+        </div>
+
+        <div class="ai-intro-tip">
+          💡 <strong>提示</strong>: 抽屉窗口已自动打开。如果没有看到,点击屏幕右侧的
+          <span class="ai-toggle-text-inline">AI</span> 标签按钮。
+        </div>
+      </section>
+    </div>
+    <!-- /Tab: AI Coach -->
   </main>
 
   <!-- Settings Modal -->
@@ -360,6 +359,90 @@
             · Stored locally at <code>backend/data/settings.json</code>
           </small>
         </div>
+
+        <details class="settings-advanced" id="settingsAdvanced">
+          <summary>⚡ Performance / Models</summary>
+          <div class="form-row form-row-inline">
+            <label for="cfgTranslateModel">Subtitle translation model</label>
+            <select id="cfgTranslateModel" class="settings-select">
+              <option value="qwen-turbo">qwen-turbo (fast + cheap, default)</option>
+              <option value="qwen-plus">qwen-plus (most accurate, slower)</option>
+              <option value="qwen-flash">qwen-flash (fastest, cheapest)</option>
+            </select>
+          </div>
+          <div class="form-row form-row-inline">
+            <label for="cfgWordModel">Word lookup LLM model</label>
+            <select id="cfgWordModel" class="settings-select">
+              <option value="qwen-flash">qwen-flash (fast + cheap, default)</option>
+              <option value="qwen-turbo">qwen-turbo (balanced)</option>
+              <option value="qwen-plus">qwen-plus (most accurate)</option>
+            </select>
+          </div>
+          <div class="form-row form-row-inline">
+            <label for="cfgDictLang">Dictionary native language</label>
+            <select id="cfgDictLang" class="settings-select">
+              <option value="en">English</option>
+              <option value="zh">简体中文</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="ru">Русский</option>
+              <option value="it">Italiano</option>
+            </select>
+          </div>
+
+          <div class="form-row form-row-inline">
+            <label for="cfgAsrModel">ASR model</label>
+            <select id="cfgAsrModel" class="settings-select">
+              <option value="qwen3-asr-flash">qwen3-asr-flash (fast streaming, default)</option>
+              <option value="qwen3-asr-flash-filetrans">qwen3-asr-flash-filetrans (better for longer audio)</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="cfgSubtitleOffset">
+              <span>⏱️ Subtitle timing offset</span>
+              <span id="cfgSubtitleOffsetValue" style="color:var(--primary); font-weight:600; margin-left:8px;">0.0s</span>
+            </label>
+            <input
+              type="range"
+              id="cfgSubtitleOffset"
+              min="-5"
+              max="5"
+              step="0.1"
+              value="0"
+              style="width:100%;"
+            />
+            <small>
+              💡 字幕整体前后偏移(秒)。若字幕总比声音慢,调大正值;字幕比声音快,调小负值。<br>
+              💡 也可在字幕行上 <strong>右键</strong> 单独重设某句的起始时间。
+            </small>
+          </div>
+
+          <div class="form-row form-row-inline aligner-row">
+            <label for="cfgAsrModel">☁️ Cloud word-level timestamps</label>
+            <small id="cfgAlignerStatus" class="aligner-status ok">Enabled</small>
+          </div>
+          <small class="aligner-help">
+            词级时间戳直接由 DashScope /audio/transcriptions 云端接口返回,无需本地模型。<br>
+            如需处理长音频,可切换到 <code>qwen3-asr-flash-filetrans</code> 模型。
+          </small>
+
+          <div class="settings-cost-card" id="settingsCostCard">
+            <div class="settings-cost-row"><span>📊 Daily cost (your setup):</span><strong id="costDaily">—</strong></div>
+            <div class="settings-cost-row"><span>💸 Would be on qwen-plus:</span><strong id="costPlus">—</strong></div>
+            <div class="settings-cost-row settings-cost-save"><span>🎉 Daily savings:</span><strong id="costSave">—</strong></div>
+            <div class="settings-cost-row"><span>⚡ Sentence cache:</span><strong id="costCache">—</strong></div>
+            <small class="settings-cost-note">Estimate based on 100 subtitle sentences + 10 word lookups per day. DashScope public pricing.</small>
+          </div>
+          <div class="settings-cache-row">
+            <button class="btn ghost btn-sm" id="settingsClearTransCacheBtn" title="Wipe data/trans_cache/ — forces re-translation of all subtitles">🗑 Clear subtitle cache</button>
+            <button class="btn ghost btn-sm" id="settingsRefreshCostBtn" title="Re-fetch cost estimate">↻ Refresh</button>
+          </div>
+        </details>
 
         <div id="settingsStatus" class="settings-status"></div>
       </div>
@@ -402,6 +485,103 @@
     </div>
   </div>
 
+  <!-- AI Assistant: Drawer Toggle (Right Edge) -->
+  <div id="aiDrawerToggle" class="ai-drawer-toggle" title="AI 语音助手" onclick="if(window.App){window.App.activateTab('ai');}if(window.AIAssistant){window.AIAssistant.togglePanel();}else{console.error('AIAssistant not loaded');}">
+    <span class="ai-toggle-icon">🤖</span>
+    <span class="ai-toggle-text">AI</span>
+  </div>
+
+  <!-- AI Assistant: Right Drawer (WeChat-style Voice Chat) -->
+  <div id="aiDrawer" class="ai-drawer hidden">
+    <!-- Drawer Header -->
+    <div class="ai-drawer-header">
+      <div class="ai-drawer-title">
+        <span class="ai-title-icon">🤖</span>
+        <div class="ai-title-text">
+          <div class="ai-title-name">AI 口语教练</div>
+          <div class="ai-title-status" id="aiStatusText">在线</div>
+        </div>
+      </div>
+      <div class="ai-drawer-actions">
+        <button id="aiTestModeBtn" class="ai-action-btn" title="视频测试模式">📺</button>
+        <button id="aiMuteToggle" class="ai-action-btn" title="静音">🔊</button>
+        <button id="aiCloseDrawer" class="ai-action-btn" title="关闭" onclick="if(window.AIAssistant){window.AIAssistant.closePanel();}return false;">✕</button>
+      </div>
+    </div>
+
+    <!-- Test Mode Status Bar -->
+    <div id="aiTestModeBar" class="ai-test-mode-bar hidden">
+      <div class="ai-test-mode-info">
+        <span class="ai-test-mode-icon">📺</span>
+        <span class="ai-test-mode-text">视频测试模式</span>
+        <span class="ai-test-mode-sub">基于当前视频字幕提问</span>
+      </div>
+      <button id="aiTestModeStop" class="ai-test-mode-stop">退出测试</button>
+    </div>
+
+    <!-- Chat Messages (WeChat Style) -->
+    <div class="ai-chat-container" id="aiChatContainer">
+      <!-- Welcome Message -->
+      <div class="ai-chat-welcome">
+        <div class="ai-welcome-time">今天</div>
+        <div class="ai-welcome-bubble">
+          👋 你好！我是你的 AI 英语口语教练。
+          <br>按住下方按钮说话，我会用语音回复你。
+        </div>
+      </div>
+
+      <!-- Messages will be appended here -->
+    </div>
+
+    <!-- Input Area -->
+    <div class="ai-input-bar">
+      <button id="aiKeyboardBtn" class="ai-input-btn" title="键盘输入">⌨️</button>
+      
+      <!-- Voice Selector -->
+      <select id="aiVoiceSelect" class="ai-voice-select" title="选择音色">
+        <option value="Cherry" selected>Cherry (女)</option>
+        <option value="Cathy">Cathy (女)</option>
+        <option value="Annie">Annie (女)</option>
+        <option value="Ava">Ava (女)</option>
+        <option value="Lois">Lois (女)</option>
+        <option value="Alice">Alice (女)</option>
+        <option value="Bryant">Bryant (男)</option>
+        <option value="Walt">Walt (男)</option>
+        <option value="zhida">zhida (中)</option>
+        <option value="zhimao">zhimao (中)</option>
+      </select>
+      
+      <div class="ai-voice-hold" id="aiVoiceHoldBtn">
+        <div class="ai-hold-inner">
+          <span class="ai-hold-icon">🎙️</span>
+          <span class="ai-hold-text">按住 说话</span>
+        </div>
+      </div>
+
+      <div class="ai-text-input hidden" id="aiTextInputArea">
+        <input type="text" id="aiTextInput" class="ai-text-field" placeholder="输入文字...">
+        <button id="aiTextSend" class="ai-send-btn">发送</button>
+      </div>
+
+      <button id="aiMoreBtn" class="ai-input-btn" title="更多">➕</button>
+    </div>
+
+    <!-- Recording Overlay -->
+    <div id="aiRecordingOverlay" class="ai-recording-overlay hidden">
+      <div class="ai-recording-panel">
+        <div class="ai-recording-waves">
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+        </div>
+        <div class="ai-recording-text">正在录音...</div>
+        <div class="ai-recording-hint">松开结束，上滑取消</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden Audio Player -->
+  <audio id="aiAudioPlayer" preload="auto"></audio>
+
   <script src="/static/js/storage.js?v=2"></script>
   <script src="/static/js/uploader.js?v=2"></script>
   <script src="/static/js/link-handler.js?v=2"></script>
@@ -409,6 +589,7 @@
   <script src="/static/js/shadow.js?v=2"></script>
   <script src="/static/js/history.js?v=2"></script>
   <script src="/static/js/tts-tab.js?v=2"></script>
+  <script src="/static/js/ai-tab.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
   <script src="/static/js/word-lookup.js?v=1"></script>
   <script src="/static/js/vocabulary.js?v=1"></script>

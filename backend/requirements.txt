@@ -6,3 +6,20 @@ python-multipart==0.0.12
 pydantic==2.9.2
 yt-dlp>=2026.3.17
 youtube-transcript-api>=1.2.4
+
+# VAD: Silero (preferred) + ONNX runtime. Falls back to ffmpeg silencedetect
+# (no extra deps) when Silero is not installed.
+silero-vad>=5.1
+onnxruntime>=1.17
+numpy>=1.26
+scipy>=1.10
+torch>=2.0
+torchaudio<2.9
+
+# Audio content classification (music / applause / silence) using scipy/numpy.
+# No ML model download required.
+
+# Local forced alignment via wav2vec2 CTC (English).
+# Much lighter than Qwen3-ForcedAligner (~380MB vs ~1.7GB).
+transformers>=4.45,<5
+accelerate>=0.34
