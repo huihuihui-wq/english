@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "description": "英语学习公有领域视频素材清单 - 严格无版权风险",
+  "last_updated": "2026-06-09",
+  "materials": [
+    {
+      "id": "voa-sample",
+      "title": "VOA Learning English - Sample",
+      "filename": "VOA/10050000-0aff-0242-1863-08da63928e02_480p.mp4",
+      "type": "news",
+      "difficulty": "beginner",
+      "duration_estimate": "2-5 min",
+      "copyright_status": "Public Domain (US Government)",
+      "source": "VOA Learning English",
+      "source_url": "https://www.voalearningenglish.com",
+      "language": "en",
+      "tags": ["news", "slow-english", "beginner"],
+      "description": "VOA慢速英语新闻，发音标准，语速较慢，适合英语初学者"
+    },
+    {
+      "id": "mlk-dream",
+      "title": "Martin Luther King Jr. - I Have a Dream (1963)",
+      "filename": "MLK_I_Have_a_Dream_1963.mp4",
+      "type": "speech",
+      "difficulty": "intermediate",
+      "duration_estimate": "17 min",
+      "copyright_status": "Public Domain",
+      "source": "National Archives / Internet Archive",
+      "source_url": "https://archive.org/details/MLKDream",
+      "youtube_url": "https://www.youtube.com/watch?v=vP4iY1TtS3s",
+      "language": "en",
+      "tags": ["speech", "history", "civil-rights", "intermediate"],
+      "description": "历史上最著名的演讲之一，节奏感强，修辞优美，适合中级学习者感受英语演讲的力量"
+    },
+    {
+      "id": "chaplin-adventurer",
+      "title": "Charlie Chaplin - The Adventurer (1917)",
+      "filename": "Chaplin_The_Adventurer_1917.mp4",
+      "type": "film",
+      "difficulty": "beginner",
+      "duration_estimate": "20 min",
+      "copyright_status": "Public Domain (pre-1929)",
+      "source": "Internet Archive",
+      "source_url": "https://archive.org/details/CC_1917_The_Adventurer",
+      "youtube_url": "https://www.youtube.com/watch?v=T8pVDQ2c6w8",
+      "language": "en",
+      "tags": ["silent-film", "comedy", "classic", "beginner"],
+      "description": "卓别林经典默片，大众熟悉的文化符号，配乐完整，适合初学者通过画面理解语境"
+    },
+    {
+      "id": "private-snafu",
+      "title": "Private Snafu - WWII Educational Cartoons",
+      "filename": "Private_Snafu_Cartoon.mp4",
+      "type": "cartoon",
+      "difficulty": "intermediate",
+      "duration_estimate": "3-5 min per episode",
+      "copyright_status": "Public Domain (US Government)",
+      "source": "Internet Archive",
+      "source_url": "https://archive.org/details/private_snafu",
+      "youtube_url": "https://www.youtube.com/watch?v=3jZy-BZUIcw",
+      "language": "en",
+      "tags": ["cartoon", "military", "educational", "intermediate", "humor"],
+      "description": "美国政府二战教育动画，幽默军事教育短片，语速适中，具有历史趣味性"
+    },
+    {
+      "id": "jfk-inaugural",
+      "title": "John F. Kennedy - Inaugural Address (1961)",
+      "filename": "JFK_Inaugural_Address_1961.mp4",
+      "type": "speech",
+      "difficulty": "advanced",
+      "duration_estimate": "14 min",
+      "copyright_status": "Public Domain",
+      "source": "National Archives / Internet Archive",
+      "source_url": "https://archive.org/details/JFKInaugural",
+      "youtube_url": "https://www.youtube.com/watch?v=NwM6s55no6U",
+      "language": "en",
+      "tags": ["speech", "history", "presidential", "advanced"],
+      "description": "历史名场面，'Ask not what your country can do for you'，发音清晰，适合高级学习者"
+    }
+  ],
+  "categories": {
+    "type": ["news", "speech", "film", "cartoon"],
+    "difficulty": ["beginner", "intermediate", "advanced"],
+    "tags": [
+      "news", "slow-english", "speech", "history", "civil-rights",
+      "silent-film", "comedy", "classic", "cartoon", "military",
+      "educational", "humor", "presidential", "beginner",
+      "intermediate", "advanced"
+    ]
+  }
+}

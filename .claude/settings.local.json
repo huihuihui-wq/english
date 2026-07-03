@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile services/youtube_subtitles.py main.py)",
+      "Read(//c/c/Users/liurf1/Desktop/A_Big_Pulgin/英语学习/**)",
+      "Read(//c/c/Users/liurf1/Desktop/A_Big_Pulgin/英语学习/english-learning-web/**)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(python -c \"import torch; print\\('torch', torch.__version__\\)\")",
+      "Bash(python -c \"import transformers; print\\('transformers', transformers.__version__\\)\")",
+      "Bash(python -c \"import sentencepiece; print\\('sentencepiece ok'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -c ' *)",
+      "Read(//c/Users/liurf1/.cache/huggingface/hub/models--facebook--nllb-200-distilled-600M/**)",
+      "Read(//c/Users/liurf1/.cache/huggingface/hub/models--facebook--nllb-200-distilled-600M/snapshots/**)",
+      "Bash(HF_ENDPOINT=https://hf-mirror.com python -u -c ' *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"=== log tail ===\"; tail -15 /tmp/nllb_dl.log 2>/dev/null; echo \"=== cache size ===\"; du -sh \"C:/Users/liurf1/.cache/huggingface/hub/models--facebook--nllb-200-distilled-600M\" 2>/dev/null; echo \"=== incomplete blobs ===\"; ls -la \"C:/Users/liurf1/.cache/huggingface/hub/models--facebook--nllb-200-distilled-600M/blobs/\" 2>/dev/null)",
+      "Read(//tmp/**)",
+      "Bash(rm -f \"C:/Users/liurf1/.cache/huggingface/hub/models--facebook--nllb-200-distilled-600M/.no_exist/\"*/model.safetensors)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -u -c ' *)",
+      "Bash(rm -f \"C:/tmp/trans_out.json\" \"/tmp/nllb_dl.log\" 2>/dev/null; echo \"temp files cleaned\")",
+      "Bash(netstat -ano)",
+      "Bash(powershell.exe -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''uvicorn|main:app'\\\\'' } | Select-Object ProcessId,CommandLine | Format-List')",
+      "Bash(powershell.exe -NoProfile -Command 'Get-CimInstance Win32_Process -Filter '\\\\''ProcessId=62672'\\\\'' | Select-Object ProcessId,ParentProcessId,Name,CommandLine | Format-List; Write-Output '\\\\''--- parent ---'\\\\''; $p=\\(Get-CimInstance Win32_Process -Filter '\\\\''ProcessId=62672'\\\\''\\).ParentProcessId; Get-CimInstance Win32_Process -Filter \"ProcessId=$p\" | Select-Object ProcessId,Name,CommandLine | Format-List')",
+      "Bash(cd \"c:/Users/liurf1/Desktop/A_Big_Pulgin/英语学习/shadow-reader/backend\" && grep -nE \"uvicorn|__main__|app.run|host=|port=\" main.py | head -20; echo \"=== test media folder ===\"; ls -la \"C:/Users/liurf1/Downloads/视频案例/\" 2>/dev/null | head -30)",
+      "Read(//c/Users/liurf1/Downloads/视频案例/**)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git push *)"
+    ],
+    "additionalDirectories": [
+      "C:\\tmp"
+    ]
+  }
+}
