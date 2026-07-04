@@ -1,0 +1,41 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-dotenv==1.0.1
+httpx==0.27.2
+python-multipart==0.0.12
+pydantic==2.9.2
+yt-dlp>=2026.3.17
+youtube-transcript-api>=1.2.4
+
+# Automatically provides PO Tokens for yt-dlp YouTube extraction.
+# Requires Node.js in PATH. Falls back gracefully if not available.
+bgutil-ytdlp-pot-provider>=0.8.0
+
+# Local ASR: faster-whisper (OpenAI Whisper, CTranslate2 backend).
+# Default model is "base" (~150 MB). First use auto-downloads from HuggingFace.
+faster-whisper>=1.1.0
+
+# VAD: Silero (preferred) + ONNX runtime. Falls back to ffmpeg silencedetect
+# (no extra deps) when Silero is not installed.
+silero-vad>=5.1
+onnxruntime>=1.17
+numpy>=1.26
+scipy>=1.10
+torch>=2.0
+torchaudio<2.9
+
+# Audio content classification (music / applause / silence) using scipy/numpy.
+# No ML model download required.
+
+# Optional fallback forced alignment via wav2vec2 CTC (English).
+# Only used if faster-whisper fails to return word timestamps.
+transformers>=4.45,<5
+accelerate>=0.34
+
+# Local multi-language translation via NLLB.
+# One model supports 200 languages (en/zh/ja/ko/fr/de/es/pt/ru/it, etc.).
+# ~600 MB downloaded once; optional CTranslate2 conversion makes it faster/smaller.
+sentencepiece>=0.2.0
+sacremoses>=0.1.0
+ctranslate2>=4.5.0
+protobuf>=3.20
