@@ -6,7 +6,12 @@ export interface SubtitleCue {
   duration: number;
   primaryText: string;
   secondaryText: string;
+  translations: Record<string, string>;
   isPlaceholder?: boolean;
+}
+
+export function getCueTranslation(cue: SubtitleCue, targetLang: string): string {
+  return cue.translations?.[targetLang] || cue.secondaryText || '';
 }
 
 export type SubtitleDisplayMode = 'bilingual' | 'primary' | 'secondary' | 'none';
@@ -23,4 +28,6 @@ export interface SubtitleSettings {
   displayMode: SubtitleDisplayMode;
   autoScroll: boolean;
   highlightColor: string;
+  translateTargetLang: string;
+  subtitleOffset: number; // 毫秒，范围 -2000 ~ 2000
 }

@@ -5,11 +5,27 @@ import type { SubtitleCue, SubtitleSettings } from '../types/subtitle';
 
 export type SidePanel = 'ai' | 'vocab' | 'search' | 'subtitles';
 
+interface TranslationState {
+  isTranslating: boolean;
+  completed: number;
+  total: number;
+  failedCueIds: number[];
+  isRetry: boolean;
+}
+
 interface SubtitleStore {
   cues: SubtitleCue[];
   currentCueId: number | null;
   selectedCueId: number | null;
   settings: SubtitleSettings;
+
+  // 翻译进度
+  translation: TranslationState;
+  startTranslation: (total: number, isRetry?: boolean) => void;
+  updateTranslationProgress: (completed: number) => void;
+  addFailedCueIds: (ids: number[]) => void;
+  clearFailedCueIds: () => void;
+  stopTranslation: () => void;
 
   // 右侧边栏
   activePanel: SidePanel;
@@ -31,6 +47,7 @@ interface SubtitleStore {
   setCues: (cues: SubtitleCue[]) => void;
   setCurrentCueId: (id: number | null) => void;
   setSelectedCueId: (id: number | null) => void;
+  updateCue: (id: number, partial: Partial<SubtitleCue>) => void;
   updateSettings: (settings: Partial<SubtitleSettings>) => void;
   getCurrentCue: () => SubtitleCue | null;
   getCueAtTime: (time: number) => SubtitleCue | null;
@@ -49,6 +66,8 @@ const defaultSettings: SubtitleSettings = {
   displayMode: 'bilingual',
   autoScroll: true,
   highlightColor: '#00D4FF',
+  translateTargetLang: 'Chinese',
+  subtitleOffset: 0,
 };
 
 export const useSubtitleStore = create<SubtitleStore>()(
@@ -59,8 +78,33 @@ export const useSubtitleStore = create<SubtitleStore>()(
       selectedCueId: null,
       settings: { ...defaultSettings },
 
+      translation: {
+        isTranslating: false,
+        completed: 0,
+        total: 0,
+        failedCueIds: [],
+        isRetry: false,
+      },
+      startTranslation: (total, isRetry = false) => set({
+        translation: { isTranslating: true, completed: 0, total, failedCueIds: [], isRetry }
+      }),
+      updateTranslationProgress: (completed) => set((state) => ({
+        translation: { ...state.translation, completed }
+      })),
+      addFailedCueIds: (ids) => set((state) => ({
+        translation: {
+          ...state.translation,
+          failedCueIds: Array.from(new Set([...state.translation.failedCueIds, ...ids]))
+        }
+      })),
+      clearFailedCueIds: () => set((state) => ({
+        translation: { ...state.translation, failedCueIds: [] }
+      })),
+      stopTranslation: () => set((state) => ({
+        translation: { ...state.translation, isTranslating: false, isRetry: false }
+      })),
+
       activePanel: 'subtitles',
-      setActivePanel: (panel) => set({ activePanel: panel }),
       setActivePanel: (panel) => set({ activePanel: panel }),
 
       searchQuery: '',
@@ -77,9 +121,12 @@ export const useSubtitleStore = create<SubtitleStore>()(
       setCues: (cues) => set({ cues }),
       setCurrentCueId: (id) => set({ currentCueId: id }),
       setSelectedCueId: (id) => set({ selectedCueId: id }),
+      updateCue: (id, partial) => set((state) => ({
+        cues: state.cues.map((cue) => (cue.id === id ? { ...cue, ...partial } : cue)),
+      })),
 
       updateSettings: (partial) => set((state) => ({
-        settings: { ...state.settings, ...partial }
+        settings: { ...defaultSettings, ...state.settings, ...partial }
       })),
 
       getCurrentCue: () => {
@@ -98,8 +145,13 @@ export const useSubtitleStore = create<SubtitleStore>()(
       name: 'subtitle-store',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        settings: state.settings,
+        settings: { ...defaultSettings, ...state.settings },
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.settings = { ...defaultSettings, ...state.settings };
+        }
+      },
     }
   )
 );

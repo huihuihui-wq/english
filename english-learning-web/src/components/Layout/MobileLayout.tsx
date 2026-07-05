@@ -7,13 +7,36 @@ import { ToolBar } from '../Toolbar/ToolBar';
 import { StudyToolsBar } from '../StudyTools/StudyToolsBar';
 import { SubtitleSettingsPanel } from '../SubtitleSettings/SubtitleSettingsPanel';
 import { AIPanelContent } from '../AIPanel/AIPanelContent';
+import { VocabularyPanel } from '../VocabularyPanel/VocabularyPanel';
+import { SearchPanel } from '../SearchPanel/SearchPanel';
+import { PanelTabs } from './PanelTabs';
 import { usePlayerStore } from '../../stores/playerStore';
+import { useSubtitleStore } from '../../stores/subtitleStore';
 
 export function MobileLayout() {
   const [showPanel, setShowPanel] = useState(false);
-  const [panelMode, setPanelMode] = useState<'subtitle' | 'ai'>('subtitle');
   const [showSettings, setShowSettings] = useState(false);
   const { video } = usePlayerStore();
+  const { activePanel } = useSubtitleStore();
+
+  const renderPanelContent = () => {
+    switch (activePanel) {
+      case 'ai':
+        return <AIPanelContent onClose={() => setShowPanel(false)} />;
+      case 'vocab':
+        return <VocabularyPanel />;
+      case 'search':
+        return <SearchPanel />;
+      case 'subtitles':
+      default:
+        return (
+          <div className="h-full flex flex-col">
+            <ToolBar onSettingsClick={() => setShowSettings(true)} />
+            <SubtitleList />
+          </div>
+        );
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-app-bg">
@@ -43,19 +66,12 @@ export function MobileLayout() {
 
       {/* 底部抽屉式面板 */}
       <div
-        className={`flex-1 bg-gray-900 overflow-hidden transition-all duration-300 ${
+        className={`flex-1 bg-gray-900 overflow-hidden transition-all duration-300 flex flex-col ${
           showPanel ? 'max-h-[60vh]' : 'max-h-0'
         }`}
       >
-        {panelMode === 'ai' && (
-          <AIPanelContent onClose={() => setPanelMode('subtitle')} />
-        )}
-        {panelMode !== 'ai' && (
-          <div className="h-full flex flex-col">
-            <ToolBar onSettingsClick={() => setShowSettings(true)} />
-            <SubtitleList />
-          </div>
-        )}
+        <PanelTabs />
+        {renderPanelContent()}
       </div>
 
       {/* 设置面板 */}

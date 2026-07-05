@@ -9,3 +9,7 @@ build/
 coverage/
 .env
 /shadow-reader
+nul
+backend/data/dict_cache/
+backend/data/history/
+backend/data/trans_cache/

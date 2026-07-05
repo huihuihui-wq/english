@@ -2,6 +2,7 @@
 import { useMemo } from 'react';
 import { useSubtitleStore } from '../../stores/subtitleStore';
 import { useStudyStore } from '../../stores/studyStore';
+import { getCueTranslation } from '../../types/subtitle';
 
 function WordSpan({ word }: { word: string }) {
   const { setSelectedWord, setActivePanel } = useSubtitleStore();
@@ -50,6 +51,8 @@ export function SubtitleOverlay() {
 
   const isPrimaryOccluded = occlusionMode === 'primary';
   const isSecondaryOccluded = occlusionMode === 'secondary';
+
+  const translatedText = currentCue ? getCueTranslation(currentCue, settings.translateTargetLang) : '';
 
   const positionStyle = useMemo(() => {
     switch (settings.position) {
@@ -103,7 +106,7 @@ export function SubtitleOverlay() {
               opacity: 0.9,
             }}
           >
-            {currentCue.secondaryText}
+            {translatedText}
           </p>
         )}
       </div>

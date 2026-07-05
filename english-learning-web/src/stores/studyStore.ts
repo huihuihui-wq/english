@@ -29,9 +29,16 @@ interface StudyStore {
   skipBlank: boolean;
   toggleSkipBlank: () => void;
 
-  // 遮挡板
-  occlusionMode: OcclusionMode;
-  setOcclusionMode: (mode: OcclusionMode) => void;
+  // 跟读录音
+  autoRecordAfterCue: boolean;
+  toggleAutoRecordAfterCue: () => void;
+  shadowRecordingMaxMs: number;
+  setShadowRecordingMaxMs: (ms: number) => void;
+
+  // 逐句复读暂停状态（不持久化）
+  isShadowingPaused: boolean;
+  shadowingPauseProgress: number;
+  setShadowingPauseState: (paused: boolean, progress: number) => void;
 
   // 收藏句子
   favoriteCueIds: number[];
@@ -42,6 +49,8 @@ interface StudyStore {
   // 自动滚动
   autoScroll: boolean;
   toggleAutoScroll: () => void;
+  scrollMode: 'auto' | 'highlight' | 'off';
+  setScrollMode: (mode: 'auto' | 'highlight' | 'off') => void;
 }
 
 export const useStudyStore = create<StudyStore>()(
@@ -61,6 +70,15 @@ export const useStudyStore = create<StudyStore>()(
       shadowingDelayMs: 0,
       setShadowingDelayMs: (ms) => set({ shadowingDelayMs: Math.max(0, Math.min(5000, ms)) }),
 
+      autoRecordAfterCue: false,
+      toggleAutoRecordAfterCue: () => set((s) => ({ autoRecordAfterCue: !s.autoRecordAfterCue })),
+      shadowRecordingMaxMs: 8000,
+      setShadowRecordingMaxMs: (ms) => set({ shadowRecordingMaxMs: Math.max(2000, Math.min(15000, ms)) }),
+
+      isShadowingPaused: false,
+      shadowingPauseProgress: 0,
+      setShadowingPauseState: (paused, progress) => set({ isShadowingPaused: paused, shadowingPauseProgress: progress }),
+
       skipBlank: false,
       toggleSkipBlank: () => set((s) => ({ skipBlank: !s.skipBlank })),
 
@@ -78,6 +96,8 @@ export const useStudyStore = create<StudyStore>()(
 
       autoScroll: true,
       toggleAutoScroll: () => set((s) => ({ autoScroll: !s.autoScroll })),
+      scrollMode: 'auto',
+      setScrollMode: (mode) => set({ scrollMode: mode }),
     }),
     {
       name: 'study-store',
@@ -86,10 +106,33 @@ export const useStudyStore = create<StudyStore>()(
         shadowingPauseMs: state.shadowingPauseMs,
         shadowingLoopCount: state.shadowingLoopCount,
         shadowingDelayMs: state.shadowingDelayMs,
+        autoRecordAfterCue: state.autoRecordAfterCue,
+        shadowRecordingMaxMs: state.shadowRecordingMaxMs,
         skipBlank: state.skipBlank,
         occlusionMode: state.occlusionMode,
         autoScroll: state.autoScroll,
+        scrollMode: state.scrollMode,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // 确保旧 persisted 数据包含新增字段的默认值
+        const defaults = {
+          shadowingPauseMs: 1500,
+          shadowingLoopCount: 3,
+          shadowingDelayMs: 0,
+          autoRecordAfterCue: false,
+          shadowRecordingMaxMs: 8000,
+          skipBlank: false,
+          occlusionMode: 'none',
+          autoScroll: true,
+          scrollMode: 'auto',
+        };
+        Object.entries(defaults).forEach(([key, value]) => {
+          if (state[key as keyof typeof state] === undefined) {
+            (state as Record<string, unknown>)[key] = value;
+          }
+        });
+      },
     }
   )
 );

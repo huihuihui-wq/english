@@ -13,7 +13,7 @@ export function PanelTabs() {
   const { activePanel, setActivePanel } = useSubtitleStore();
 
   return (
-    <div className="flex items-center border-b border-white/10 bg-app-bg">
+    <div className="flex items-center border-b border-white/10 bg-app-bg shrink-0">
       {panels.map((panel) => {
         const Icon = panel.icon;
         const isActive = activePanel === panel.id;
@@ -21,7 +21,7 @@ export function PanelTabs() {
           <button
             key={panel.id}
             onClick={() => setActivePanel(panel.id)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors ${
               isActive
                 ? 'text-subtitle-highlight border-b-2 border-subtitle-highlight'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'

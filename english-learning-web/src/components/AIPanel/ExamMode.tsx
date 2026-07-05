@@ -1,6 +1,6 @@
 // components/AIPanel/ExamMode.tsx - 雅思口语模拟
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { Send, ArrowRight, RotateCcw, Trophy, AlertCircle } from 'lucide-react'
+import { Send, ArrowRight, RotateCcw, Trophy, AlertCircle, Volume2, VolumeX } from 'lucide-react'
 import { sendExamChat, getAIHealth } from '../../api/ai'
 import { useAIStore, newMessage } from '../../stores/aiStore'
 import { useSubtitleStore } from '../../stores/subtitleStore'
@@ -22,6 +22,8 @@ export function ExamMode() {
   const setAnswer = useAIStore((s) => s.setExamAnswer)
   const advance = useAIStore((s) => s.advanceExam)
   const reset = useAIStore((s) => s.resetExam)
+  const autoPlayAI = useAIStore((s) => s.autoPlayAI)
+  const toggleAutoPlayAI = useAIStore((s) => s.toggleAutoPlayAI)
 
   const cues = useSubtitleStore((s) => s.cues)
   const currentCueId = useSubtitleStore((s) => s.currentCueId)
@@ -82,7 +84,7 @@ export function ExamMode() {
       const bandMatch = result.reply.match(/Band\s*(\d(?:\.\d)?)/i)
       const band = bandMatch ? parseFloat(bandMatch[1]) : null
 
-      setAnswer(currentIndex, text, result.reply, band)
+      setAnswer(currentIndex, text, result.reply, band, result.audio)
       advance()
     } catch (e: unknown) {
       alert(`提交失败: ${e instanceof Error ? e.message : String(e)}`)
@@ -172,12 +174,22 @@ export function ExamMode() {
           <span className="text-xs text-gray-400">
             第 {currentIndex + 1} / {questions.length} 题
           </span>
-          <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-subtitle-highlight transition-all"
-              style={{ width: `${((currentIndex) / questions.length) * 100}%` }}
-            />
-          </div>
+          <button
+            onClick={toggleAutoPlayAI}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${
+              autoPlayAI ? 'bg-subtitle-highlight/20 text-subtitle-highlight' : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title={autoPlayAI ? '自动朗读已开启' : '自动朗读已关闭'}
+          >
+            {autoPlayAI ? <Volume2 size={12} /> : <VolumeX size={12} />}
+            自动朗读
+          </button>
+        </div>
+        <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-subtitle-highlight transition-all"
+            style={{ width: `${((currentIndex) / questions.length) * 100}%` }}
+          />
         </div>
       </div>
 
@@ -194,7 +206,10 @@ export function ExamMode() {
         {currentQ.answer && (
           <>
             <MessageBubble message={newMessage('user', currentQ.answer)} />
-            <MessageBubble message={newMessage('assistant', currentQ.feedback || '')} />
+            <MessageBubble
+              message={{ ...newMessage('assistant', currentQ.feedback || ''), audio: currentQ.audio }}
+              autoPlay={autoPlayAI}
+            />
           </>
         )}
       </div>

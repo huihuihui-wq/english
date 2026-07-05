@@ -5,6 +5,7 @@ import { ChatMode } from './ChatMode';
 import { ExamMode } from './ExamMode';
 import { ExplainMode } from './ExplainMode';
 import { GenerateMode } from './GenerateMode';
+import { AIErrorBoundary } from './AIErrorBoundary';
 import { useAIStore } from '../../stores/aiStore';
 
 interface AIPanelContentProps {
@@ -32,12 +33,14 @@ export function AIPanelContent({ onClose }: AIPanelContentProps) {
       </div>
 
       <ModeTabs />
-      <div className="flex-1 overflow-hidden">
-        {mode === 'chat' && <ChatMode />}
-        {mode === 'exam' && <ExamMode />}
-        {mode === 'explain' && <ExplainMode />}
-        {mode === 'generate' && <GenerateMode />}
-      </div>
+      <AIErrorBoundary>
+        <div className="flex-1 overflow-hidden">
+          {mode === 'chat' && <ChatMode />}
+          {mode === 'exam' && <ExamMode />}
+          {mode === 'explain' && <ExplainMode />}
+          {mode === 'generate' && <GenerateMode />}
+        </div>
+      </AIErrorBoundary>
     </div>
   );
 }

@@ -17,7 +17,7 @@ export function RightSidebar({ onSettingsClick }: RightSidebarProps) {
   return (
     <div className="w-[40%] h-full flex flex-col bg-app-bg border-l border-white/10">
       <PanelTabs />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col">
         {activePanel === 'ai' && <AIPanelContent />}
         {activePanel === 'vocab' && <VocabularyPanel />}
         {activePanel === 'search' && <SearchPanel />}

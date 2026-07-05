@@ -13,9 +13,22 @@
       },
       "source_history_id": "f8ccc8724f1d",
       "added_at": "2026-06-11T02:12:56Z",
-      "updated_at": "2026-06-11T02:12:56Z",
+      "updated_at": "2026-07-05T06:51:50Z",
       "meaning_native": "",
-      "native_lang": "zh"
+      "native_lang": "zh",
+      "roots": {
+        "prefix": "",
+        "root": "",
+        "suffix": ""
+      },
+      "etymology_en": "",
+      "etymology_native": "",
+      "family": [],
+      "related": [],
+      "proficiency": 2,
+      "review_count": 1,
+      "next_review_at": "2026-07-05T07:51:50Z",
+      "last_reviewed_at": "2026-07-05T06:51:50Z"
     }
   ]
 }

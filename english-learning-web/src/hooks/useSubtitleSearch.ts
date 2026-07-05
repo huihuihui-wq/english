@@ -27,9 +27,15 @@ export function useSubtitleSearch() {
 
     const matchedIds = cues
       .filter(
-        (cue) =>
-          cue.primaryText.toLowerCase().includes(normalizedQuery) ||
-          cue.secondaryText.toLowerCase().includes(normalizedQuery)
+        (cue) => {
+          const allTranslations = Object.values(cue.translations || {}).join(' ');
+          const secondary = cue.secondaryText || '';
+          return (
+            cue.primaryText.toLowerCase().includes(normalizedQuery) ||
+            secondary.toLowerCase().includes(normalizedQuery) ||
+            allTranslations.toLowerCase().includes(normalizedQuery)
+          );
+        }
       )
       .map((cue) => cue.id);
 

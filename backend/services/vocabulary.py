@@ -47,11 +47,17 @@ VOCAB_FILE = DATA_DIR / "vocabulary.json"
 _lock = threading.RLock()
 _cache: Optional[dict] = None
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_NATIVE_LANG = "en"
 
 # v3 optional fields — added with safe defaults during migration
 _V3_FIELDS = ("roots", "etymology_en", "etymology_native", "family", "related")
+# v4 SRS fields
+_V4_FIELDS = ("proficiency", "review_count", "next_review_at", "last_reviewed_at")
+
+# Minimal intervals (minutes) for spaced repetition based on proficiency.
+# Proficiency 1 = new, 5 = mastered.
+_REVIEW_INTERVAL_MINUTES = [0, 10, 60, 360, 1440, 4320]
 
 
 def _now_iso() -> str:
@@ -84,6 +90,15 @@ def _migrate(record: dict) -> dict:
                 out[k] = []
             else:
                 out[k] = ""
+    # v3 -> v4: SRS fields
+    for k in _V4_FIELDS:
+        if k not in out:
+            if k == "proficiency":
+                out[k] = 1
+            elif k == "review_count":
+                out[k] = 0
+            else:
+                out[k] = None
     return out
 
 
@@ -197,6 +212,10 @@ def add_word(entry: dict) -> dict:
             "etymology_native": entry.get("etymology_native") or "",
             "family": list(entry.get("family") or []),
             "related": list(entry.get("related") or []),
+            "proficiency": 1,
+            "review_count": 0,
+            "next_review_at": now,
+            "last_reviewed_at": None,
         }
         _cache["words"].append(record)
         _flush()
@@ -220,9 +239,80 @@ def remove_word(word: str) -> bool:
         return removed
 
 
+def review_word(word: str, correct: bool) -> Optional[dict]:
+    """Record a review result and update SRS scheduling.
+
+    Args:
+        word: The word being reviewed.
+        correct: True if the user answered correctly.
+
+    Returns:
+        The updated record, or None if the word is not in vocabulary.
+    """
+    key = (word or "").strip().lower()
+    if not key:
+        return None
+
+    now = datetime.utcnow()
+    now_iso = _now_iso()
+
+    with _lock:
+        _ensure_file()
+        for w in _cache["words"]:
+            if (w.get("word") or "").strip().lower() == key:
+                current_proficiency = max(1, min(5, int(w.get("proficiency", 1) or 1)))
+                review_count = int(w.get("review_count", 0) or 0)
+
+                if correct:
+                    new_proficiency = min(5, current_proficiency + 1)
+                else:
+                    new_proficiency = max(1, current_proficiency - 1)
+
+                interval_minutes = _REVIEW_INTERVAL_MINUTES[new_proficiency]
+                next_review = now.fromtimestamp(now.timestamp() + interval_minutes * 60)
+
+                w["proficiency"] = new_proficiency
+                w["review_count"] = review_count + 1
+                w["last_reviewed_at"] = now_iso
+                w["next_review_at"] = next_review.isoformat(timespec="seconds") + "Z"
+                w["updated_at"] = now_iso
+
+                _flush()
+                return dict(w)
+    return None
+
+
+def due_words() -> list[dict]:
+    """Return words whose next_review_at is in the past, sorted by due time."""
+    now = datetime.utcnow()
+    with _lock:
+        _ensure_file()
+        items = [dict(w) for w in _cache["words"]]
+
+    due = []
+    for w in items:
+        next_review = w.get("next_review_at")
+        if not next_review:
+            due.append(w)
+            continue
+        try:
+            if datetime.fromisoformat(next_review.replace("Z", "+00:00")) <= now:
+                due.append(w)
+        except Exception:
+            due.append(w)
+
+    due.sort(key=lambda w: w.get("next_review_at") or "")
+    return due
+
+
 def stats() -> dict:
     with _lock:
         _ensure_file()
-        return {
-            "total": len(_cache["words"]),
-        }
+        total = len(_cache["words"])
+        due = len(due_words())
+        mastered = sum(1 for w in _cache["words"] if w.get("proficiency", 1) >= 5)
+    return {
+        "total": total,
+        "due": due,
+        "mastered": mastered,
+    }

@@ -3,11 +3,12 @@ import { SearchBar } from '../SubtitlePanel/SearchBar';
 import { useSubtitleSearch } from '../../hooks/useSubtitleSearch';
 import { useSubtitleStore } from '../../stores/subtitleStore';
 import { formatTime } from '../../utils/timeFormat';
+import { getCueTranslation } from '../../types/subtitle';
 import { FileSearch } from 'lucide-react';
 
 export function SearchPanel() {
   const { query, results, currentIndex, jumpToMatch } = useSubtitleSearch();
-  const { cues } = useSubtitleStore();
+  const { cues, settings } = useSubtitleStore();
 
   const matchedCues = cues.filter((cue) => results.includes(cue.id));
 
@@ -52,9 +53,12 @@ export function SearchPanel() {
                   <span className="text-xs text-gray-600">{formatTime(cue.startTime)}</span>
                 </div>
                 <p className="text-white text-sm line-clamp-2">{cue.primaryText}</p>
-                {cue.secondaryText && (
-                  <p className="text-gray-400 text-sm line-clamp-1 mt-0.5">{cue.secondaryText}</p>
-                )}
+                {(() => {
+                  const translated = getCueTranslation(cue, settings.translateTargetLang);
+                  return translated ? (
+                    <p className="text-gray-400 text-sm line-clamp-1 mt-0.5">{translated}</p>
+                  ) : null;
+                })()}
               </button>
             ))}
           </div>

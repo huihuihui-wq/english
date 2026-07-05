@@ -34,24 +34,24 @@ export async function getAIHealth(): Promise<AIHealth> {
   return resp.json() as Promise<AIHealth>
 }
 
-export async function sendChat(req: ChatRequest): Promise<{ reply: string; model: string }> {
-  const data = await postJSON<{ ok: boolean; reply: string; model: string }>('/chat', {
+export async function sendChat(req: ChatRequest): Promise<{ reply: string; model: string; audio?: string }> {
+  const data = await postJSON<{ ok: boolean; reply: string; model: string; audio?: string }>('/chat', {
     message: req.message,
     context: req.context || '',
     history: (req.history || []).map(({ role, content }) => ({ role, content })),
   })
-  return { reply: data.reply, model: data.model }
+  return { reply: data.reply, model: data.model, audio: data.audio }
 }
 
-export async function sendExamChat(req: ExamChatRequest): Promise<{ reply: string; model: string }> {
-  const data = await postJSON<{ ok: boolean; reply: string; model: string }>('/exam', {
+export async function sendExamChat(req: ExamChatRequest): Promise<{ reply: string; model: string; audio?: string }> {
+  const data = await postJSON<{ ok: boolean; reply: string; model: string; audio?: string }>('/exam', {
     message: req.message,
     question: req.question,
     question_index: req.question_index,
     total_questions: req.total_questions,
     history: (req.history || []).map(({ role, content }) => ({ role, content })),
   })
-  return { reply: data.reply, model: data.model }
+  return { reply: data.reply, model: data.model, audio: data.audio }
 }
 
 export async function generateExamQuestions(
@@ -66,20 +66,21 @@ export async function generateExamQuestions(
   return { questions: data.questions, model: data.model }
 }
 
-export async function sendExplain(req: ExplainRequest): Promise<{ explanation: string; model: string }> {
-  const data = await postJSON<{ ok: boolean; explanation: string; model: string }>('/explain', {
+export async function sendExplain(req: ExplainRequest): Promise<{ explanation: string; model: string; audio?: string }> {
+  const data = await postJSON<{ ok: boolean; explanation: string; model: string; audio?: string }>('/explain', {
     text: req.text,
     context: req.context || '',
   })
-  return { explanation: data.explanation, model: data.model }
+  return { explanation: data.explanation, model: data.model, audio: data.audio }
 }
 
 // ---------------------------------------------------------------------------
 // 流式 (SSE) - 真正流式，通过 /api/ai/chat/stream 获取
 // ---------------------------------------------------------------------------
 export interface StreamEvent {
-  type: 'delta' | 'done' | 'error'
-  content: string
+  type: 'delta' | 'audio' | 'done' | 'error'
+  content?: string
+  audio?: string
 }
 
 export async function* streamChat(

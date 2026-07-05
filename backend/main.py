@@ -1,4 +1,5 @@
 """FastAPI main entry - Shadow Reader"""
+import asyncio
 import base64
 import hashlib
 import json
@@ -14,9 +15,10 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -56,17 +58,36 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    """把 Pydantic 校验错误转为友好的中文提示，不暴露字段细节。"""
+    logger.warning("Validation error on %s %s: %s", request.method, request.url.path, exc.errors())
+    messages = []
+    for err in exc.errors():
+        loc = err.get("loc") or []
+        field = ".".join(str(x) for x in loc if isinstance(x, str))
+        msg = err.get("msg", "参数错误")
+        messages.append(f"{field or '请求参数'}: {msg}" if field else msg)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "请求参数有误",
+            "errors": messages[:5],
+        },
+    )
+
+
 @app.exception_handler(Exception)
-async def _unhandled_exception_handler(request, exc):
-    """Log full traceback and return a useful error so we can debug 500s from the browser."""
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """服务端日志记录完整 traceback；客户端只返回通用错误信息。"""
     import traceback
     tb = traceback.format_exc()
     logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
     return JSONResponse(
         status_code=500,
         content={
-            "detail": f"{type(exc).__name__}: {exc}",
-            "traceback": tb.splitlines()[-12:],
+            "detail": "服务器内部错误，请稍后重试",
+            "error_code": "internal_error",
         },
     )
 
@@ -114,9 +135,17 @@ class TranslateSubtitlesRequest(BaseModel):
     source_lang: Optional[str] = "English"
 
 
+class TranslateSubtitlesStreamRequest(BaseModel):
+    sentences: list[str]
+    target_lang: Optional[str] = "Chinese"
+    source_lang: Optional[str] = "English"
+    batch_size: int = 25
+
+
 class SubtitleGenerateRequest(BaseModel):
     video_url: str
     language: str = "en"
+    translate: bool = False
 
 
 class HistoryCreateRequest(BaseModel):
@@ -174,7 +203,14 @@ class VocabularyAddRequest(BaseModel):
     related: Optional[list] = None
 
 
-# AI 助手请求模型
+class VocabularyReviewRequest(BaseModel):
+    word: str
+    correct: bool
+
+
+class VocabularyReviewModeRequest(BaseModel):
+    mode: str = "choice"  # choice | spelling | listening
+    count: int = 10
 class AIChatRequest(BaseModel):
     message: str
     context: Optional[str] = ""
@@ -342,6 +378,7 @@ async def transcribe(
     file: UploadFile = File(...),
     duration: Optional[float] = Form(None),
     language: str = Form("en"),
+    translate: bool = Form(False),
 ):
     language = (language or "en").strip().lower()
     content_type = file.content_type or "application/octet-stream"
@@ -413,9 +450,9 @@ async def transcribe(
         if duration is None or duration <= 0:
             duration = real_duration or get_audio_duration(file_bytes, content_type)
 
-        # Auto-translate only English source for now; non-English sources keep translation blank
-        # so the user can manually translate later. Skip placeholder entries.
-        if language == "en":
+        # Auto-translate only when explicitly requested and source is English.
+        # Non-English sources keep translation blank so the user can manually translate later.
+        if language == "en" and translate:
             translate_indices = [i for i, it in enumerate(items) if not it.get("is_placeholder")]
             en_list = [items[i]["en"] for i in translate_indices]
             trans_map = {i: {"en": items[i]["en"], "zh": ""} for i in translate_indices}
@@ -518,7 +555,7 @@ def _download_youtube_audio(video_url: str, out_path: Path) -> None:
         ydl.download([video_url])
 
 
-async def _process_online_video(video_url: str, language: str = "en") -> dict:
+async def _process_online_video(video_url: str, language: str = "en", translate: bool = False) -> dict:
     language = (language or "en").strip().lower()
     logger.info("Processing online video: %s, lang=%s", video_url, language)
 
@@ -613,7 +650,7 @@ async def _process_online_video(video_url: str, language: str = "en") -> dict:
         if not items:
             raise HTTPException(400, "No sentences could be extracted")
 
-        if language == "en":
+        if language == "en" and translate:
             translate_indices = [i for i, it in enumerate(items) if not it.get("is_placeholder")]
             en_list = [items[i]["en"] for i in translate_indices]
             trans_map = {i: {"en": items[i]["en"], "zh": ""} for i in translate_indices}
@@ -729,7 +766,7 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
         except YouTubeSubtitleError as e:
             logger.warning("YouTube subtitle fetch failed, falling back to local ASR: %s", e)
             try:
-                ai_result = await _process_online_video(video_url, req.language)
+                ai_result = await _process_online_video(video_url, req.language, req.translate)
                 ai_result["source"] = "local_asr_fallback"
                 ai_result["fallback_reason"] = e.user_message
                 ai_result["youtube_error_code"] = e.error_code
@@ -753,7 +790,7 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
         except (ValueError, RuntimeError) as e:
             logger.warning("YouTube subtitle fetch failed, falling back to local ASR: %s", e)
             try:
-                ai_result = await _process_online_video(video_url, req.language)
+                ai_result = await _process_online_video(video_url, req.language, req.translate)
                 ai_result["source"] = "local_asr_fallback"
                 ai_result["fallback_reason"] = str(e)
                 return ai_result
@@ -770,7 +807,7 @@ async def generate_subtitles_api(req: SubtitleGenerateRequest):
                     f"  3. Set YT_COOKIES in backend/.env if YouTube blocks your IP",
                 )
 
-    return await _process_online_video(video_url, req.language)
+    return await _process_online_video(video_url, req.language, req.translate)
 
 
 # ---------------------------------------------------------------------------
@@ -844,6 +881,99 @@ async def translate_subtitles_api(req: TranslateSubtitlesRequest):
             "remaining": max(0, total_quota - current_used - estimated_tokens),
         },
     }
+
+
+@app.post("/api/translate-subtitles/stream")
+async def translate_subtitles_stream_api(req: TranslateSubtitlesStreamRequest, request: Request):
+    """Stream subtitle translation in batches via SSE.
+
+    Each completed batch is emitted immediately so the UI can show progressive
+    results. Cancelled/disconnected clients stop further processing but keep
+    everything already translated.
+    """
+    sentences = [s for s in (req.sentences or []) if isinstance(s, str) and s.strip()]
+    if not sentences:
+        raise HTTPException(400, "No sentences to translate")
+
+    from services.translate import _TARGET_LANG_MAP
+
+    target_lang = req.target_lang or "Chinese"
+    if target_lang not in _TARGET_LANG_MAP:
+        raise HTTPException(
+            400,
+            f"Unsupported target language: {target_lang}. Available: {list(_TARGET_LANG_MAP.keys())}",
+        )
+
+    batch_size = max(5, min(50, req.batch_size or 25))
+    field = _TARGET_LANG_MAP[target_lang]["field"]
+    total = len(sentences)
+
+    async def event_stream():
+        completed = 0
+        cache_hits_total = 0
+        llm_calls_total = 0
+        elapsed_total = 0.0
+        all_outputs: list[str] = []
+        try:
+            for start in range(0, total, batch_size):
+                if await request.is_disconnected():
+                    yield f"data: {json.dumps({'type': 'cancelled', 'completed': completed, 'total': total})}\n\n"
+                    return
+
+                end = min(start + batch_size, total)
+                batch = sentences[start:end]
+                try:
+                    llm_resp = await translate_sentences(
+                        batch,
+                        target_lang=target_lang,
+                        source_lang=req.source_lang or "en",
+                    )
+                except Exception as e:
+                    logger.exception("Translation batch %d-%d failed", start, end)
+                    yield f"data: {json.dumps({'type': 'error', 'start_index': start, 'end_index': end, 'message': str(e), 'completed': completed, 'total': total})}\n\n"
+                    continue
+
+                completed += len(batch)
+                cache_hits_total += llm_resp.get("cache_hits", 0)
+                llm_calls_total += llm_resp.get("llm_calls", 0)
+                elapsed_total += llm_resp.get("elapsed_s", 0.0)
+
+                batch_translations = llm_resp.get("translations", [])
+                all_outputs.extend([
+                    (t.get(field, "") if isinstance(t, dict) else "")
+                    for t in batch_translations
+                ])
+
+                yield f"data: {json.dumps({'type': 'batch', 'start_index': start, 'end_index': end, 'translations': batch_translations, 'field': field})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'completed': completed, 'total': total})}\n\n"
+
+            estimated_tokens = _estimate_tokens(sentences) + _estimate_tokens(all_outputs)
+            current_used = 0
+            try:
+                current_used = int(app_config.get_setting("DASHSCOPE_USED_TOKENS", "0") or 0)
+                app_config.set_setting(
+                    "DASHSCOPE_USED_TOKENS",
+                    str(current_used + estimated_tokens),
+                    persist=True,
+                )
+            except Exception:
+                pass
+
+            total_quota = int(app_config.get_setting("DASHSCOPE_FREE_QUOTA", "1000000") or 1000000)
+            yield f"data: {json.dumps({'type': 'done', 'completed': completed, 'total': total, 'cache_hits': cache_hits_total, 'llm_calls': llm_calls_total, 'elapsed_s': round(elapsed_total, 3), 'estimated_tokens': estimated_tokens, 'quota': {'total_quota': total_quota, 'used_tokens': current_used + estimated_tokens, 'remaining': max(0, total_quota - current_used - estimated_tokens)}})}\n\n"
+        except asyncio.CancelledError:
+            logger.info("Translation stream cancelled")
+            yield f"data: {json.dumps({'type': 'cancelled', 'completed': completed, 'total': total})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1165,6 +1295,89 @@ async def vocabulary_list():
     return {"items": vocab_service.list_words(), "stats": vocab_service.stats()}
 
 
+@app.get("/api/vocabulary/due")
+async def vocabulary_due():
+    return {"items": vocab_service.due_words(), "stats": vocab_service.stats()}
+
+
+@app.post("/api/vocabulary/review")
+async def vocabulary_review(req: VocabularyReviewRequest):
+    word = (req.word or "").strip()
+    if not word:
+        raise HTTPException(400, "word is required")
+    record = vocab_service.review_word(word, req.correct)
+    if record is None:
+        raise HTTPException(404, f"word not in vocabulary: {word}")
+    return {"ok": True, "item": record}
+
+
+@app.post("/api/vocabulary/review-session")
+async def vocabulary_review_session(req: VocabularyReviewModeRequest):
+    """Generate a review session from due words.
+
+    Returns a list of questions in the requested mode. For modes that need
+    distractors (choice/listening), picks them from the rest of the vocabulary.
+    """
+    mode = (req.mode or "choice").strip().lower()
+    if mode not in ("choice", "spelling", "listening"):
+        raise HTTPException(400, "mode must be one of: choice, spelling, listening")
+
+    due = vocab_service.due_words()
+    all_words = vocab_service.list_words()
+    word_pool = [w["word"] for w in all_words if w.get("word")]
+
+    questions = []
+    for word in due[: req.count]:
+        item = {
+            "word": word["word"],
+            "meaning_native": word.get("meaning_native", ""),
+            "meaning_en": word.get("meaning_en", ""),
+            "pos": word.get("pos", ""),
+            "proficiency": word.get("proficiency", 1),
+        }
+
+        if mode == "choice":
+            # 4 choices: correct meaning + 3 distractor meanings
+            distractors = [
+                w.get("meaning_native", "") or w.get("meaning_en", "")
+                for w in all_words
+                if w.get("word") and w["word"].lower() != word["word"].lower()
+                and (w.get("meaning_native") or w.get("meaning_en"))
+            ]
+            import random
+            random.seed(word["word"])
+            choices = [item["meaning_native"] or item["meaning_en"]]
+            for d in random.sample(distractors, min(3, len(distractors))):
+                if d not in choices:
+                    choices.append(d)
+            random.shuffle(choices)
+            item["choices"] = choices
+            item["answer"] = item["meaning_native"] or item["meaning_en"]
+
+        elif mode == "listening":
+            # 4 choices: correct word + 3 distractor words
+            distractors = [
+                w["word"] for w in all_words
+                if w.get("word") and w["word"].lower() != word["word"].lower()
+            ]
+            import random
+            random.seed(word["word"])
+            choices = [word["word"]]
+            for d in random.sample(distractors, min(3, len(distractors))):
+                if d not in choices:
+                    choices.append(d)
+            random.shuffle(choices)
+            item["choices"] = choices
+            item["answer"] = word["word"]
+
+        elif mode == "spelling":
+            item["answer"] = word["word"]
+
+        questions.append(item)
+
+    return {"mode": mode, "questions": questions, "stats": vocab_service.stats()}
+
+
 @app.post("/api/vocabulary")
 async def vocabulary_add(req: VocabularyAddRequest):
     word = (req.word or "").strip()
@@ -1243,6 +1456,37 @@ async def ai_chat(req: AIChatRequest):
     except Exception as e:
         logger.exception("[ai/chat] failed")
         raise HTTPException(500, f"AI chat error: {e}")
+
+
+@app.post("/api/ai/chat/stream")
+async def ai_chat_stream(req: AIChatRequest):
+    """流式 AI 聊天（SSE）。"""
+    message = (req.message or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+
+    if not app_config.is_dashscope_configured():
+        raise HTTPException(401, "DashScope API key is not configured")
+
+    async def event_stream():
+        async for data in ai_service.stream_chat(
+            message=message,
+            context=req.context or "",
+            history=req.history,
+            voice=req.voice or "Cherry",
+        ):
+            yield f"data: {data}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/ai/exam")
@@ -1565,7 +1809,8 @@ async def cost_estimate():
 # ---------------------------------------------------------------------------
 # Static frontend
 # ---------------------------------------------------------------------------
-FRONTEND_DIR = (BASE_DIR.parent / "frontend").resolve()
+# 生产构建产物位于 ../english-learning-web/dist
+FRONTEND_DIR = (BASE_DIR.parent / "english-learning-web" / "dist").resolve()
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
@@ -1575,6 +1820,17 @@ if FRONTEND_DIR.exists():
         if index_file.exists():
             return FileResponse(index_file)
         return JSONResponse({"msg": "frontend not built"})
+
+else:
+    @app.get("/")
+    async def index():
+        return JSONResponse(
+            {
+                "msg": "frontend not built",
+                "hint": f"Run 'npm run build' in {BASE_DIR.parent / 'english-learning-web'}",
+                "expected_dir": str(FRONTEND_DIR),
+            }
+        )
 
 
 if __name__ == "__main__":

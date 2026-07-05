@@ -7,10 +7,14 @@ interface AIStore {
   mode: AIMode
   setMode: (m: AIMode) => void
 
+  // 全局 AI 设置
+  autoPlayAI: boolean
+  toggleAutoPlayAI: () => void
+
   // Chat 模式
   chatMessages: ChatMessage[]
   appendChatMessage: (m: ChatMessage) => void
-  updateLastAssistant: (text: string) => void
+  updateLastAssistant: (text: string, audio?: string) => void
   clearChat: () => void
 
   // Exam 模式
@@ -18,15 +22,16 @@ interface AIStore {
   examCurrentIndex: number
   examFinished: boolean
   setExamQuestions: (qs: ExamQuestion[]) => void
-  setExamAnswer: (index: number, answer: string, feedback: string, band: number | null) => void
+  setExamAnswer: (index: number, answer: string, feedback: string, band: number | null, audio?: string) => void
   advanceExam: () => void
   resetExam: () => void
 
   // Explain 模式
   lastExplainText: string
   lastExplainResult: string
+  lastExplainAudio?: string
   setExplainText: (t: string) => void
-  setExplainResult: (r: string) => void
+  setExplainResult: (r: string, audio?: string) => void
 }
 
 export const useAIStore = create<AIStore>()(
@@ -35,14 +40,17 @@ export const useAIStore = create<AIStore>()(
       mode: 'chat',
       setMode: (m) => set({ mode: m }),
 
+      autoPlayAI: false,
+      toggleAutoPlayAI: () => set((s) => ({ autoPlayAI: !s.autoPlayAI })),
+
       chatMessages: [],
       appendChatMessage: (m) => set((s) => ({ chatMessages: [...s.chatMessages, m] })),
-      updateLastAssistant: (text) =>
+      updateLastAssistant: (text, audio) =>
         set((s) => {
           const msgs = [...s.chatMessages]
           for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'assistant') {
-              msgs[i] = { ...msgs[i], content: text }
+              msgs[i] = { ...msgs[i], content: text, audio }
               break
             }
           }
@@ -55,10 +63,10 @@ export const useAIStore = create<AIStore>()(
       examFinished: false,
       setExamQuestions: (qs) =>
         set({ examQuestions: qs, examCurrentIndex: 0, examFinished: qs.length === 0 }),
-      setExamAnswer: (index, answer, feedback, band) =>
+      setExamAnswer: (index, answer, feedback, band, audio) =>
         set((s) => {
           const questions = s.examQuestions.map((q) =>
-            q.index === index ? { ...q, answer, feedback, band } : q
+            q.index === index ? { ...q, answer, feedback, band, audio } : q
           )
           return { examQuestions: questions }
         }),
@@ -75,20 +83,23 @@ export const useAIStore = create<AIStore>()(
 
       lastExplainText: '',
       lastExplainResult: '',
+      lastExplainAudio: undefined,
       setExplainText: (t) => set({ lastExplainText: t }),
-      setExplainResult: (r) => set({ lastExplainResult: r }),
+      setExplainResult: (r, audio) => set({ lastExplainResult: r, lastExplainAudio: audio }),
     }),
     {
       name: 'ai-store',
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         mode: s.mode,
+        autoPlayAI: s.autoPlayAI,
         chatMessages: s.chatMessages,
         examQuestions: s.examQuestions,
         examCurrentIndex: s.examCurrentIndex,
         examFinished: s.examFinished,
         lastExplainText: s.lastExplainText,
         lastExplainResult: s.lastExplainResult,
+        lastExplainAudio: s.lastExplainAudio,
       }),
     }
   )

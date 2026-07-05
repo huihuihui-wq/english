@@ -1,18 +1,20 @@
 // components/VocabularyPanel/VocabularyPanel.tsx
 import { useEffect, useState, useCallback } from 'react';
-import { BookOpen, Volume2, Star, Loader2, X, Trash2, Search, ChevronLeft } from 'lucide-react';
+import { BookOpen, Volume2, Star, Loader2, X, Trash2, Search, ChevronLeft, Download, Brain } from 'lucide-react';
 import { useSubtitleStore } from '../../stores/subtitleStore';
 import { useVocabularyLookup } from '../../hooks/useVocabularyLookup';
-import { listVocabulary, removeFromVocabulary, playWordTTS, type VocabularyEntry } from '../../api/vocabulary';
+import { listVocabulary, removeFromVocabulary, playWordTTS, type VocabularyEntry, type VocabularyStats } from '../../api/vocabulary';
+import { exportVocabularyToCSV } from '../../utils/export';
+import { VocabularyReview } from './VocabularyReview';
 
 export function VocabularyPanel() {
   const { selectedWord, setSelectedWord, setActivePanel } = useSubtitleStore();
   const { data, loading, error, saved, lookup, play, save, clear } = useVocabularyLookup();
 
   // 词汇列表状态
-  const [viewMode, setViewMode] = useState<'detail' | 'list'>('list');
+  const [viewMode, setViewMode] = useState<'detail' | 'list' | 'review'>('list');
   const [vocabItems, setVocabItems] = useState<VocabularyEntry[]>([]);
-  const [vocabStats, setVocabStats] = useState({ total: 0 });
+  const [vocabStats, setVocabStats] = useState<VocabularyStats>({ total: 0, due: 0, mastered: 0 });
   const [listLoading, setListLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingWord, setDeletingWord] = useState<string | null>(null);
@@ -82,11 +84,15 @@ export function VocabularyPanel() {
     }
   };
 
+  const handleExportCSV = useCallback(() => {
+    exportVocabularyToCSV(vocabItems);
+  }, [vocabItems]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
         <div className="flex items-center gap-2">
-          {viewMode === 'detail' && selectedWord && (
+          {(viewMode === 'detail' || viewMode === 'review') && (
             <button
               onClick={() => {
                 setSelectedWord(null);
@@ -98,23 +104,48 @@ export function VocabularyPanel() {
             </button>
           )}
           <span className="text-sm font-semibold">
-            {viewMode === 'detail' && selectedWord ? `📖 ${selectedWord}` : `📚 生词本 (${vocabStats.total})`}
+            {viewMode === 'detail' && selectedWord
+              ? `📖 ${selectedWord}`
+              : viewMode === 'review'
+              ? '🧠 复习'
+              : `📚 生词本 (${vocabStats.total})`}
           </span>
         </div>
-        <button
-          onClick={() => setActivePanel('subtitles')}
-          className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white"
-          title="返回字幕"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          {viewMode === 'list' && (
+            <button
+              onClick={() => setViewMode('review')}
+              className="flex items-center gap-1 px-2 py-1 rounded hover:bg-white/10 text-gray-400 hover:text-white text-xs"
+              title="开始复习"
+            >
+              <Brain size={14} />
+              {vocabStats.due > 0 && (
+                <span className="w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
+                  {vocabStats.due}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={() => setActivePanel('subtitles')}
+            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white"
+            title="返回字幕"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
-      {viewMode === 'list' ? (
+      {viewMode === 'review' ? (
+        <VocabularyReview
+          onClose={() => setViewMode('list')}
+          onStatsUpdate={(stats) => setVocabStats(stats)}
+        />
+      ) : viewMode === 'list' ? (
         <>
-          {/* 搜索栏 */}
-          <div className="px-3 py-2 border-b border-white/10">
-            <div className="relative">
+          {/* 搜索栏 + 导出 */}
+          <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2">
+            <div className="relative flex-1">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 type="text"
@@ -124,6 +155,14 @@ export function VocabularyPanel() {
                 className="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-subtitle-highlight/50"
               />
             </div>
+            <button
+              onClick={handleExportCSV}
+              disabled={vocabItems.length === 0}
+              className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors disabled:opacity-30"
+              title="导出 CSV"
+            >
+              <Download size={16} />
+            </button>
           </div>
 
           {/* 列表内容 */}
@@ -163,6 +202,10 @@ export function VocabularyPanel() {
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-subtitle-highlight/20 text-subtitle-highlight">
                               {item.pos}
                             </span>
+                          )}
+                          <ProficiencyBadge proficiency={item.proficiency || 1} />
+                          {isDue(item) && (
+                            <span className="w-2 h-2 rounded-full bg-red-500" title="到期复习" />
                           )}
                         </div>
                         {(item.meaning_native || item.meaning_en) && (
@@ -344,4 +387,29 @@ export function VocabularyPanel() {
       )}
     </div>
   );
+}
+
+function ProficiencyBadge({ proficiency }: { proficiency: number }) {
+  const level = Math.max(1, Math.min(5, proficiency || 1));
+  const colors = [
+    'bg-gray-500/20 text-gray-400',
+    'bg-red-500/20 text-red-400',
+    'bg-yellow-500/20 text-yellow-400',
+    'bg-blue-500/20 text-blue-400',
+    'bg-green-500/20 text-green-400',
+  ];
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded ${colors[level - 1]}`}>
+      L{level}
+    </span>
+  );
+}
+
+function isDue(item: VocabularyEntry): boolean {
+  if (!item.next_review_at) return true;
+  try {
+    return new Date(item.next_review_at) <= new Date();
+  } catch {
+    return true;
+  }
 }

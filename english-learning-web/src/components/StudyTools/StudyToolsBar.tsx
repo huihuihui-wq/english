@@ -3,12 +3,13 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   SkipBack, Play, SkipForward,
   RotateCcw, ArrowLeftRight, Eye, EyeOff, Type, Languages,
-  Gauge
+  Gauge, Mic
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/playerStore';
 import { useStudyStore } from '../../stores/studyStore';
 import { useSubtitleStore } from '../../stores/subtitleStore';
 import { useABRepeat } from '../../hooks/useABRepeat';
+import { ShadowRecordingPanel } from '../ShadowRecording/ShadowRecordingPanel';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const DISPLAY_MODES = ['bilingual', 'primary', 'secondary', 'none'] as const;
@@ -19,12 +20,17 @@ export function StudyToolsBar() {
     isSentenceShadowing, toggleSentenceShadowing,
     skipBlank, toggleSkipBlank,
     occlusionMode, setOcclusionMode,
-    abRepeat
+    abRepeat,
+    isShadowingPaused,
+    shadowingPauseProgress,
+    shadowingPauseMs,
+    shadowingLoopCount,
   } = useStudyStore();
   const { settings, updateSettings, cues } = useSubtitleStore();
   const { setPointA, setPointB, clearABRepeat } = useABRepeat();
 
   const [showSpeed, setShowSpeed] = useState(false);
+  const [showRecordingPanel, setShowRecordingPanel] = useState(false);
   const speedRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭倍速 popover
@@ -135,6 +141,22 @@ export function StudyToolsBar() {
         </button>
       </div>
 
+      {/* 逐句复读暂停进度条 */}
+      {isSentenceShadowing && isShadowingPaused && (
+        <div className="px-6 py-2">
+          <div className="flex items-center justify-between text-xs text-subtitle-highlight mb-1">
+            <span>请跟读这句话</span>
+            <span>{shadowingLoopCount} 遍 / 暂停 {shadowingPauseMs / 1000}s</span>
+          </div>
+          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-subtitle-highlight transition-all duration-100"
+              style={{ width: `${shadowingPauseProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* 底部学习工具 */}
       <div className="flex items-center justify-around px-4 py-2 border-t border-white/10">
         <StudyToolButton
@@ -142,6 +164,12 @@ export function StudyToolsBar() {
           label="逐句复读"
           active={isSentenceShadowing}
           onClick={toggleSentenceShadowing}
+        />
+        <StudyToolButton
+          icon={Mic}
+          label="跟读"
+          active={showRecordingPanel}
+          onClick={() => setShowRecordingPanel(true)}
         />
         <StudyToolButton
           icon={ArrowLeftRight}
@@ -198,6 +226,15 @@ export function StudyToolsBar() {
           )}
         </div>
       </div>
+
+      {/* 跟读录音面板弹窗 */}
+      {showRecordingPanel && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60">
+          <div className="w-full sm:w-[420px] sm:max-w-[90vw] h-[70vh] sm:h-[600px] bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+            <ShadowRecordingPanel onClose={() => setShowRecordingPanel(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

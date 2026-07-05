@@ -5,6 +5,7 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  audio?: string
   createdAt: number
 }
 
@@ -14,6 +15,13 @@ export interface ExamQuestion {
   answer?: string
   feedback?: string
   band?: number | null
+  audio?: string
+}
+
+export interface ExplainResult {
+  text: string
+  explanation: string
+  audio?: string
 }
 
 export interface AIHealth {

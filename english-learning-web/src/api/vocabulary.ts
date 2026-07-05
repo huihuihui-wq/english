@@ -35,7 +35,30 @@ export interface VocabularyEntry {
     en?: string;
     native?: string;
   };
+  // SRS fields
+  proficiency?: number;
+  review_count?: number;
+  next_review_at?: string;
+  last_reviewed_at?: string;
 }
+
+export interface VocabularyStats {
+  total: number;
+  due: number;
+  mastered: number;
+}
+
+export interface ReviewQuestion {
+  word: string;
+  meaning_native?: string;
+  meaning_en?: string;
+  pos?: string;
+  proficiency?: number;
+  choices?: string[];
+  answer: string;
+}
+
+export type ReviewMode = 'choice' | 'spelling' | 'listening';
 
 const API_BASE = '/api';
 
@@ -95,8 +118,24 @@ export async function removeFromVocabulary(word: string): Promise<unknown> {
   return resp.json().catch(() => ({}));
 }
 
-export async function listVocabulary(): Promise<{ items: VocabularyEntry[]; stats: { total: number } }> {
-  return getJSON<{ items: VocabularyEntry[]; stats: { total: number } }>('/vocabulary');
+export async function listVocabulary(): Promise<{ items: VocabularyEntry[]; stats: VocabularyStats }> {
+  return getJSON<{ items: VocabularyEntry[]; stats: VocabularyStats }>('/vocabulary');
+}
+
+export async function listDueVocabulary(): Promise<{ items: VocabularyEntry[]; stats: VocabularyStats }> {
+  return getJSON<{ items: VocabularyEntry[]; stats: VocabularyStats }>('/vocabulary/due');
+}
+
+export async function reviewVocabularyWord(word: string, correct: boolean): Promise<VocabularyEntry> {
+  const resp = await postJSON<{ item: VocabularyEntry }>('/vocabulary/review', { word, correct });
+  return resp.item;
+}
+
+export async function generateReviewSession(
+  mode: ReviewMode,
+  count = 10,
+): Promise<{ mode: ReviewMode; questions: ReviewQuestion[]; stats: VocabularyStats }> {
+  return postJSON<{ mode: ReviewMode; questions: ReviewQuestion[]; stats: VocabularyStats }>('/vocabulary/review-session', { mode, count });
 }
 
 export async function playWordTTS(word: string): Promise<void> {

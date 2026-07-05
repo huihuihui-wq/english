@@ -1,6 +1,6 @@
 // components/SubtitlePanel/CueActionMenu.tsx
 import { useEffect, useRef } from 'react';
-import { Play, Star, BookOpen, Repeat, X, Languages } from 'lucide-react';
+import { Play, Star, BookOpen, Repeat, X, Languages, SkipBack, SkipForward } from 'lucide-react';
 import { useStudyStore } from '../../stores/studyStore';
 import { useSubtitleStore } from '../../stores/subtitleStore';
 import { useSubtitleSync } from '../../hooks/useSubtitleSync';
@@ -16,7 +16,7 @@ interface CueActionMenuProps {
 export function CueActionMenu({ cue, onClose }: CueActionMenuProps) {
   const { favoriteCueIds, toggleFavorite } = useStudyStore();
   const { setSelectedWord, setActivePanel } = useSubtitleStore();
-  const { seekToCue } = useSubtitleSync();
+  const { seekToCue, adjustCueTime } = useSubtitleSync({ enableSync: false });
   const { setSentenceRepeat } = useABRepeat();
   const { setMode } = useAIStore();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -63,12 +63,24 @@ export function CueActionMenu({ cue, onClose }: CueActionMenuProps) {
     onClose();
   };
 
+  const handleAdjustEarlier = () => {
+    adjustCueTime(cue.id, -200);
+    onClose();
+  };
+
+  const handleAdjustLater = () => {
+    adjustCueTime(cue.id, 200);
+    onClose();
+  };
+
   const items = [
     { id: 'play', icon: Play, label: '播放此句', onClick: handlePlay },
     { id: 'favorite', icon: Star, label: isFavorite ? '取消收藏' : '收藏', onClick: handleFavorite },
     { id: 'explain', icon: BookOpen, label: 'AI 讲解', onClick: handleExplain },
     { id: 'repeat', icon: Repeat, label: '单句循环', onClick: handleRepeat },
     { id: 'vocab', icon: Languages, label: '词汇查询', onClick: handleVocab },
+    { id: 'earlier', icon: SkipBack, label: '提前 0.2s', onClick: handleAdjustEarlier },
+    { id: 'later', icon: SkipForward, label: '延后 0.2s', onClick: handleAdjustLater },
   ];
 
   return (

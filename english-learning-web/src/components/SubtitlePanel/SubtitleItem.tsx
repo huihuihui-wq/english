@@ -6,6 +6,7 @@ import { useStudyStore } from '../../stores/studyStore';
 import { useSubtitleSync } from '../../hooks/useSubtitleSync';
 import { CueActionMenu } from './CueActionMenu';
 import { formatTime } from '../../utils/timeFormat';
+import { getCueTranslation } from '../../types/subtitle';
 import type { SubtitleCue } from '../../types/subtitle';
 
 interface SubtitleItemProps {
@@ -84,7 +85,7 @@ function SecondaryText({ text, query }: { text: string; query: string }) {
 export function SubtitleItem({ cue, isActive, isMatched = false }: SubtitleItemProps) {
   const { settings, searchQuery } = useSubtitleStore();
   const { favoriteCueIds, toggleFavorite, occlusionMode } = useStudyStore();
-  const { seekToCue } = useSubtitleSync();
+  const { seekToCue } = useSubtitleSync({ enableSync: false });
   const [showMenu, setShowMenu] = useState(false);
 
   const isFavorite = favoriteCueIds.includes(cue.id);
@@ -95,15 +96,17 @@ export function SubtitleItem({ cue, isActive, isMatched = false }: SubtitleItemP
   const shouldShowPrimary = settings.displayMode === 'bilingual' || settings.displayMode === 'primary';
   const shouldShowSecondary = settings.displayMode === 'bilingual' || settings.displayMode === 'secondary';
 
+  const translatedText = getCueTranslation(cue, settings.translateTargetLang);
+
   return (
     <div
       data-cue-id={cue.id}
-      className={`relative p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+      className={`relative p-3 rounded-lg cursor-pointer border-l-4 ${
         isActive
-          ? 'bg-white/10 border-l-4 border-subtitle-highlight'
+          ? 'bg-subtitle-highlight/15 border-subtitle-highlight'
           : isMatched
-            ? 'bg-subtitle-highlight/10 border-l-4 border-subtitle-highlight/50 hover:bg-white/5'
-            : 'hover:bg-white/5 border-l-4 border-transparent'
+            ? 'bg-subtitle-highlight/10 border-subtitle-highlight/50 hover:bg-white/5'
+            : 'hover:bg-white/5 border-transparent'
       } ${isPlaceholder ? 'opacity-50' : ''}`}
       onClick={() => seekToCue(cue.id)}
     >
@@ -162,7 +165,7 @@ export function SubtitleItem({ cue, isActive, isMatched = false }: SubtitleItemP
           isSecondaryOccluded ? 'blur-[4px] select-none' : ''
         }`}
         >
-          <SecondaryText text={cue.secondaryText} query={searchQuery} />
+          <SecondaryText text={translatedText} query={searchQuery} />
         </p>
       )}
     </div>

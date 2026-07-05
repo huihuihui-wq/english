@@ -1,6 +1,6 @@
 // components/AIPanel/ChatMode.tsx - 自由对话模式
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { Send, Trash2, AlertCircle } from 'lucide-react'
+import { Send, Trash2, AlertCircle, Volume2, VolumeX } from 'lucide-react'
 import { streamChat, getAIHealth } from '../../api/ai'
 import { useAIStore, newMessage } from '../../stores/aiStore'
 import { useSubtitleStore } from '../../stores/subtitleStore'
@@ -17,6 +17,8 @@ export function ChatMode() {
   const append = useAIStore((s) => s.appendChatMessage)
   const updateLast = useAIStore((s) => s.updateLastAssistant)
   const clear = useAIStore((s) => s.clearChat)
+  const autoPlayAI = useAIStore((s) => s.autoPlayAI)
+  const toggleAutoPlayAI = useAIStore((s) => s.toggleAutoPlayAI)
 
   const cues = useSubtitleStore((s) => s.cues)
 
@@ -56,11 +58,15 @@ export function ChatMode() {
 
     try {
       let fullText = ''
+      let audioBase64: string | undefined
       for await (const ev of streamChat({ message: text, context: subtitleContext, history })) {
-        if (ev.type === 'delta') {
+        if (ev.type === 'delta' && ev.content) {
           fullText += ev.content
           updateLast(fullText)
-        } else if (ev.type === 'error') {
+        } else if (ev.type === 'audio' && ev.audio) {
+          audioBase64 = ev.audio
+          updateLast(fullText, audioBase64)
+        } else if (ev.type === 'error' && ev.content) {
           updateLast(`❌ ${ev.content}`)
           break
         }
@@ -100,12 +106,24 @@ export function ChatMode() {
       {/* 头部 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
         <span className="text-xs text-gray-400">视频上下文: {cues.length} 句字幕</span>
-        <button
-          onClick={clear}
-          className="flex items-center gap-1 text-gray-500 hover:text-red-400 transition-colors text-xs"
-        >
-          <Trash2 size={12} /> 清空
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleAutoPlayAI}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${
+              autoPlayAI ? 'bg-subtitle-highlight/20 text-subtitle-highlight' : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title={autoPlayAI ? '自动朗读已开启' : '自动朗读已关闭'}
+          >
+            {autoPlayAI ? <Volume2 size={12} /> : <VolumeX size={12} />}
+            自动朗读
+          </button>
+          <button
+            onClick={clear}
+            className="flex items-center gap-1 text-gray-500 hover:text-red-400 transition-colors text-xs"
+          >
+            <Trash2 size={12} /> 清空
+          </button>
+        </div>
       </div>
 
       {/* 消息区 */}
@@ -121,6 +139,7 @@ export function ChatMode() {
               key={msg.id}
               message={msg}
               streaming={loading && msg.role === 'assistant' && msg.id === messages[messages.length - 1].id && !msg.content}
+              autoPlay={autoPlayAI}
             />
           ))
         )}

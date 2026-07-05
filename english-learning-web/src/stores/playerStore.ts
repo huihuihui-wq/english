@@ -37,8 +37,12 @@ export const usePlayerStore = create<PlayerStore>()(
       
       play: async () => {
         const { playerRef } = get();
-        if (!playerRef) return;
-        
+        if (!playerRef) {
+          // 外部播放器（如 YouTube IFrame）会根据 isPlaying 状态自行同步
+          set({ isPlaying: true });
+          return;
+        }
+
         try {
           await playerRef.play();
           set({ isPlaying: true });
@@ -47,11 +51,14 @@ export const usePlayerStore = create<PlayerStore>()(
           set({ isPlaying: false });
         }
       },
-      
+
       pause: () => {
         const { playerRef } = get();
-        if (!playerRef) return;
-        
+        if (!playerRef) {
+          set({ isPlaying: false });
+          return;
+        }
+
         try {
           playerRef.pause();
           set({ isPlaying: false });
@@ -59,11 +66,14 @@ export const usePlayerStore = create<PlayerStore>()(
           console.error('Pause failed:', error);
         }
       },
-      
+
       togglePlay: async () => {
         const { isPlaying, playerRef } = get();
-        if (!playerRef) return;
-        
+        if (!playerRef) {
+          set({ isPlaying: !isPlaying });
+          return;
+        }
+
         try {
           if (isPlaying) {
             await playerRef.pause();
@@ -82,10 +92,11 @@ export const usePlayerStore = create<PlayerStore>()(
       },
       
       seek: (time) => {
+        if (!Number.isFinite(time)) return;
         const { playerRef } = get();
         if (playerRef) {
-          playerRef.currentTime = time / 1000;
-          set({ currentTime: time });
+          playerRef.currentTime = Math.max(0, time) / 1000;
+          set({ currentTime: Math.max(0, time) });
         }
       },
       

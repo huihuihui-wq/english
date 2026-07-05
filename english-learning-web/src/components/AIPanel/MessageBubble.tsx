@@ -1,81 +1,76 @@
 // components/AIPanel/MessageBubble.tsx - 单条消息气泡(支持 markdown)
-import { Bot, User } from 'lucide-react'
+import { Bot, User, Volume2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import type { ChatMessage } from '../../types/ai'
 
 interface MessageBubbleProps {
   message: ChatMessage
   streaming?: boolean
+  autoPlay?: boolean
 }
 
-// 简易 markdown 渲染: 标题/列表/加粗/代码块/换行
-function renderMarkdown(text: string): React.ReactNode {
-  const lines = text.split('\n')
-  const out: React.ReactNode[] = []
-  let listBuffer: string[] = []
+function playBase64Mp3(base64: string): HTMLAudioElement {
+  const audio = new Audio(`data:audio/mpeg;base64,${base64}`)
+  void audio.play()
+  return audio
+}
 
-  const flushList = () => {
-    if (listBuffer.length) {
-      out.push(
-        <ul key={`ul-${out.length}`} className="list-disc list-inside space-y-0.5 my-1">
-          {listBuffer.map((item, i) => (
-            <li key={i} dangerouslySetInnerHTML={{ __html: inlineMd(item) }} />
-          ))}
-        </ul>
-      )
-      listBuffer = []
+const markdownComponents = {
+  h3: ({ children }: { children?: React.ReactNode }) => (
+    <h3 className="font-semibold text-sm mt-2 mb-1 text-subtitle-highlight">{children}</h3>
+  ),
+  h2: ({ children }: { children?: React.ReactNode }) => (
+    <h2 className="font-semibold text-base mt-2 mb-1">{children}</h2>
+  ),
+  p: ({ children }: { children?: React.ReactNode }) => (
+    <p className="my-1 leading-relaxed">{children}</p>
+  ),
+  ul: ({ children }: { children?: React.ReactNode }) => (
+    <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>
+  ),
+  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+    const isInline = !className;
+    return isInline ? (
+      <code className="px-1 py-0.5 bg-white/10 rounded text-xs">{children}</code>
+    ) : (
+      <pre className="bg-white/10 rounded p-2 my-2 overflow-x-auto">
+        <code className={`${className} text-xs`}>{children}</code>
+      </pre>
+    );
+  },
+}
+
+export function MessageBubble({ message, streaming, autoPlay }: MessageBubbleProps) {
+  const isUser = message.role === 'user'
+  const [isPlaying, setIsPlaying] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const autoPlayedRef = useRef(false)
+
+  const handlePlay = () => {
+    if (!message.audio || isPlaying) return
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    const audio = playBase64Mp3(message.audio)
+    audioRef.current = audio
+    setIsPlaying(true)
+    audio.onended = () => {
+      setIsPlaying(false)
+      audioRef.current = null
+    }
+    audio.onerror = () => {
+      setIsPlaying(false)
+      audioRef.current = null
     }
   }
 
-  lines.forEach((line, idx) => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('### ')) {
-      flushList()
-      out.push(
-        <h3 key={idx} className="font-semibold text-sm mt-2 mb-1 text-subtitle-highlight">
-          {trimmed.slice(4)}
-        </h3>
-      )
-    } else if (trimmed.startsWith('## ')) {
-      flushList()
-      out.push(
-        <h2 key={idx} className="font-semibold text-base mt-2 mb-1">
-          {trimmed.slice(3)}
-        </h2>
-      )
-    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-      listBuffer.push(trimmed.slice(2))
-    } else if (trimmed === '') {
-      flushList()
-    } else {
-      flushList()
-      out.push(
-        <p
-          key={idx}
-          className="my-1 leading-relaxed"
-          dangerouslySetInnerHTML={{ __html: inlineMd(trimmed) }}
-        />
-      )
-    }
-  })
-  flushList()
-  return out
-}
+  // 自动播放一次（如果上层允许且消息非空）
+  if (autoPlay && message.audio && !isUser && !streaming && message.content && !autoPlayedRef.current) {
+    autoPlayedRef.current = true
+    handlePlay()
+  }
 
-function inlineMd(s: string): string {
-  // 转义 HTML
-  let out = s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  // 加粗 **text**
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  // 行内代码 `code`
-  out = out.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-white/10 rounded text-xs">$1</code>')
-  return out
-}
-
-export function MessageBubble({ message, streaming }: MessageBubbleProps) {
-  const isUser = message.role === 'user'
   return (
     <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div
@@ -95,12 +90,27 @@ export function MessageBubble({ message, streaming }: MessageBubbleProps) {
         ) : (
           <div className="break-words">
             {message.content
-              ? renderMarkdown(message.content)
+              ? (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
+                </div>
+              )
               : streaming
                 ? <span className="inline-block animate-pulse">▍</span>
                 : null}
             {streaming && message.content && (
               <span className="inline-block animate-pulse ml-0.5">▍</span>
+            )}
+            {!streaming && message.audio && (
+              <button
+                onClick={handlePlay}
+                disabled={isPlaying}
+                className="mt-2 flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-50"
+                title="播放 AI 语音"
+              >
+                <Volume2 size={12} />
+                {isPlaying ? '播放中...' : '播放语音'}
+              </button>
             )}
           </div>
         )}

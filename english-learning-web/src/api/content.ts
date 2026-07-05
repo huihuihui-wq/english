@@ -70,24 +70,29 @@ export interface HistoryRecord {
     zh?: string;
     source_lang?: string;
     is_placeholder?: boolean;
+    translations?: Record<string, string>;
+    [lang: string]: unknown;
   }>;
   raw_text?: string;
   progress_seconds?: number;
   source_lang?: string;
+  available_translations?: Record<string, string>;
 }
 
 // 转录本地音视频文件
 export async function transcribeFile(
   file: File,
   language: string = 'en',
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  translate: boolean = false,
 ): Promise<TranscribeResponse> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('language', language);
+  formData.append('translate', translate ? 'true' : 'false');
 
   const xhr = new XMLHttpRequest();
-  
+
   return new Promise((resolve, reject) => {
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable && onProgress) {
@@ -127,12 +132,13 @@ export async function transcribeFile(
 // 生成在线视频字幕（YouTube / 直接链接）
 export async function generateSubtitles(
   videoUrl: string,
-  language: string = 'en'
+  language: string = 'en',
+  translate: boolean = false,
 ): Promise<GenerateSubtitlesResponse> {
   const resp = await fetch(`${API_BASE}/generate-subtitles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ video_url: videoUrl, language }),
+    body: JSON.stringify({ video_url: videoUrl, language, translate }),
   });
 
   if (!resp.ok) {
@@ -148,6 +154,120 @@ export async function generateSubtitles(
   }
 
   return resp.json();
+}
+
+export interface TranslateSubtitlesResult {
+  translations: Array<{ en: string; [key: string]: string | undefined }>;
+  field: string;
+}
+
+export interface TranslateBatchEvent {
+  type: 'progress' | 'batch' | 'done' | 'error' | 'cancelled';
+  completed?: number;
+  total?: number;
+  start_index?: number;
+  end_index?: number;
+  translations?: Array<{ en: string; [key: string]: string | undefined }>;
+  field?: string;
+  message?: string;
+  cache_hits?: number;
+  llm_calls?: number;
+  elapsed_s?: number;
+}
+
+// 在线翻译字幕（保留时间轴，按索引映射）
+export async function translateSubtitles(
+  sentences: string[],
+  targetLang: string = 'Chinese',
+  sourceLang: string = 'English',
+): Promise<TranslateSubtitlesResult> {
+  const resp = await fetch(`${API_BASE}/translate-subtitles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sentences, target_lang: targetLang, source_lang: sourceLang }),
+  });
+
+  if (!resp.ok) {
+    let msg = `HTTP ${resp.status}`;
+    try {
+      const j = await resp.json();
+      if (j?.detail) msg = j.detail;
+      if (j?.error) msg = j.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(msg);
+  }
+
+  const data = await resp.json();
+  return {
+    translations: data.translations || [],
+    field: data.field || 'zh',
+  };
+}
+
+// 流式分批翻译字幕，每完成一批立即 yield 事件
+export async function* translateSubtitlesStream(
+  sentences: string[],
+  targetLang: string = 'Chinese',
+  sourceLang: string = 'English',
+  batchSize: number = 25,
+  signal?: AbortSignal,
+): AsyncGenerator<TranslateBatchEvent, void, void> {
+  const resp = await fetch(`${API_BASE}/translate-subtitles/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sentences,
+      target_lang: targetLang,
+      source_lang: sourceLang,
+      batch_size: batchSize,
+    }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    let msg = `HTTP ${resp.status}`;
+    try {
+      const j = await resp.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      // ignore
+    }
+    yield { type: 'error', message: msg } as TranslateBatchEvent;
+    return;
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    yield { type: 'error', message: 'No response body' } as TranslateBatchEvent;
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const data = trimmed.slice(6);
+        if (data === '[DONE]') return;
+        try {
+          yield JSON.parse(data) as TranslateBatchEvent;
+        } catch {
+          // ignore malformed events
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // 加载字幕文件（SRT/VTT）
@@ -224,20 +344,63 @@ export function convertSubtitles(items: Array<{
   zh?: string;
   source_lang?: string;
   is_placeholder?: boolean;
+  translations?: Record<string, string>;
+  [lang: string]: unknown;
 }>): SubtitleCue[] {
-  return items.map((s, i) => ({
-    id: i + 1,
-    startTime: Math.round(s.start * 1000),
-    endTime: Math.round(s.end * 1000),
-    duration: Math.round((s.end - s.start) * 1000),
-    primaryText: s.en || '',
-    secondaryText: s.zh || '',
-    isPlaceholder: !!s.is_placeholder,
-  }));
+  return items.map((s, i) => {
+    const translations: Record<string, string> = { ...(s.translations || {}) };
+    if (s.zh) translations['Chinese'] = s.zh;
+
+    // 兼容后端可能直接返回的 lang 字段（如 ja, fr 等）
+    const knownLangs = ['Chinese', 'Chinese-Traditional', 'Japanese', 'Korean', 'French', 'German', 'Spanish', 'Portuguese', 'Russian', 'Italian'];
+    const langMap: Record<string, string> = {
+      zh: 'Chinese',
+      'zh-TW': 'Chinese-Traditional',
+      ja: 'Japanese',
+      ko: 'Korean',
+      fr: 'French',
+      de: 'German',
+      es: 'Spanish',
+      pt: 'Portuguese',
+      ru: 'Russian',
+      it: 'Italian',
+    };
+    Object.entries(s).forEach(([key, value]) => {
+      if (knownLangs.includes(key) || langMap[key]) {
+        const lang = langMap[key] || key;
+        if (typeof value === 'string' && value.trim()) {
+          translations[lang] = value;
+        }
+      }
+    });
+
+    return {
+      id: i + 1,
+      startTime: Math.round(s.start * 1000),
+      endTime: Math.round(s.end * 1000),
+      duration: Math.round((s.end - s.start) * 1000),
+      primaryText: s.en || '',
+      secondaryText: translations['Chinese'] || s.zh || '',
+      translations,
+      isPlaceholder: !!s.is_placeholder,
+    };
+  });
 }
 
 // 测试后端 ASR 是否就绪
 export async function testASR(): Promise<{ ok: boolean; asr: string }> {
-  const resp = await fetch(`${API_BASE}/transcribe/test`);
+  const resp = await fetch(`${API_BASE}/transcribe/test`, {
+    method: 'POST',
+  });
+  if (!resp.ok) {
+    let msg = `HTTP ${resp.status}`;
+    try {
+      const j = await resp.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(msg);
+  }
   return resp.json();
 }

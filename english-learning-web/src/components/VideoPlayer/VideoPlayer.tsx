@@ -3,6 +3,8 @@ import { useRef, useEffect, useCallback } from 'react';
 import { usePlayerStore } from '../../stores/playerStore';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { PlayerControls } from './PlayerControls';
+import { YouTubePlayer } from './YouTubePlayer';
+import { isYouTubeUrl } from '../../utils/youtube';
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -18,14 +20,17 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
     handleEnded: () => {},
     handleFullscreenChange: () => {},
   });
-  const { 
-    setPlayerRef, 
-    updateCurrentTime, 
-    setDuration, 
+  const {
+    setPlayerRef,
+    updateCurrentTime,
+    setDuration,
     playbackRate,
+    isPlaying,
     setFullscreen,
   } = usePlayerStore();
-  
+  const isYouTube = isYouTubeUrl(videoUrl);
+  const rafHandleRef = useRef<number | null>(null);
+
   // 使用 ref 存储最新的 store 方法，避免闭包问题
   const storeRef = useRef({ updateCurrentTime, setDuration, playbackRate, setPlayerRef, setFullscreen });
   useEffect(() => {
@@ -45,35 +50,56 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
   
   useEffect(() => {
     if (!videoRef.current) return;
-    
+
     const video = videoRef.current;
     storeRef.current.setPlayerRef(video);
-    
+
     // 使用 ref 存储回调，避免闭包问题
     callbacksRef.current.handleTimeUpdate = () => {
       storeRef.current.updateCurrentTime(video.currentTime * 1000);
     };
-    
+
     callbacksRef.current.handleLoadedMetadata = () => {
       storeRef.current.setDuration(video.duration * 1000);
       video.playbackRate = storeRef.current.playbackRate;
     };
-    
+
     callbacksRef.current.handleEnded = () => {
       usePlayerStore.setState({ isPlaying: false });
     };
-    
+
     callbacksRef.current.handleFullscreenChange = () => {
       storeRef.current.setFullscreen(!!document.fullscreenElement);
     };
-    
+
     const { handleTimeUpdate, handleLoadedMetadata, handleEnded, handleFullscreenChange } = callbacksRef.current;
-    
+
+    // 优先使用 requestVideoFrameCallback 获取高精度时间，不支持则降级 timeupdate
+    const supportsRVFC = 'requestVideoFrameCallback' in video;
+    const videoWithRVFC = video as HTMLVideoElement & {
+      requestVideoFrameCallback: (cb: () => void) => number;
+      cancelVideoFrameCallback: (handle: number) => void;
+    };
+
+    let frameCallback: (() => void) | null = null;
+    if (supportsRVFC) {
+      frameCallback = () => {
+        handleTimeUpdate();
+        if (frameCallback) {
+          rafHandleRef.current = videoWithRVFC.requestVideoFrameCallback(frameCallback);
+        }
+      };
+    }
+
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('ended', handleEnded);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
+
+    if (frameCallback) {
+      rafHandleRef.current = videoWithRVFC.requestVideoFrameCallback(frameCallback);
+    }
+
     // 如果视频已加载，立即同步状态
     if (video.readyState >= 1) {
       handleLoadedMetadata();
@@ -81,7 +107,7 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
     if (video.readyState >= 2) {
       handleTimeUpdate();
     }
-    
+
     return () => {
       try {
         video.pause();
@@ -92,6 +118,14 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('ended', handleEnded);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      if (rafHandleRef.current && supportsRVFC) {
+        try {
+          videoWithRVFC.cancelVideoFrameCallback(rafHandleRef.current);
+        } catch {
+          // ignore
+        }
+        rafHandleRef.current = null;
+      }
       storeRef.current.setPlayerRef(null);
     };
   }, [videoUrl]); // 只在 videoUrl 变化时重新绑定
@@ -102,6 +136,17 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
       videoRef.current.playbackRate = playbackRate;
     }
   }, [playbackRate]);
+
+  // 同步 isPlaying 状态到 HTML5 video（playerStore 现在对 YouTube 也使用状态驱动）
+  useEffect(() => {
+    if (!videoRef.current || isYouTube) return;
+    const video = videoRef.current;
+    if (isPlaying) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, [isPlaying, isYouTube]);
   
   // 键盘快捷键 - 使用 ref 存储回调，避免重复注册
   const keyboardRef = useRef({
@@ -141,24 +186,28 @@ export function VideoPlayer({ videoUrl, poster }: VideoPlayerProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []); // 空依赖，只注册一次
-  
+
   return (
-    <div 
+    <div
       ref={containerRef}
       className="relative w-full bg-black aspect-video group"
     >
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain"
-        poster={poster}
-        preload="metadata"
-      >
-        <source src={videoUrl} type="video/mp4" />
-      </video>
-      
+      {isYouTube ? (
+        <YouTubePlayer videoUrl={videoUrl} />
+      ) : (
+        <video
+          ref={videoRef}
+          className="w-full h-full object-contain"
+          poster={poster}
+          preload="metadata"
+        >
+          <source src={videoUrl} type="video/mp4" />
+        </video>
+      )}
+
       {/* 字幕叠加层 */}
       <SubtitleOverlay />
-      
+
       {/* 播放控制层 */}
       <PlayerControls onFullscreenToggle={toggleFullscreen} />
     </div>

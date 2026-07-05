@@ -12,6 +12,7 @@ import {
   type TranscribeResponse,
   type HistoryItem,
 } from '../../api/content';
+import { saveFile, getFile } from '../../utils/fileCache';
 import type { VideoInfo } from '../../types/player';
 import type { SubtitleCue } from '../../types/subtitle';
 
@@ -39,9 +40,11 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [asrReady, setAsrReady] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const historyFileInputRef = useRef<HTMLInputElement>(null);
   const subInputRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingSub, setPendingSub] = useState<File | null>(null);
+  const [pendingHistoryItem, setPendingHistoryItem] = useState<HistoryItem | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [language, setLanguage] = useState('en');
 
@@ -110,13 +113,13 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
         setLoadingMsg('正在解析字幕文件...');
         subtitles = await loadSubtitleFile(pendingSub);
       } else {
-        // 否则用后端 ASR 转录
+        // 否则用后端 ASR 转录（默认只生成英文字幕，不自动翻译）
         setLoadingMsg('正在转录音频（首次加载需要下载模型，请耐心等待）...');
         const result: TranscribeResponse = await transcribeFile(pendingFile, language, (p) => {
           setUploadProgress(p);
           if (p < 100) setLoadingMsg(`正在上传... ${p}%`);
           else setLoadingMsg('正在转录音频...');
-        });
+        }, false);
         subtitles = convertSubtitles(result.subtitles);
       }
 
@@ -141,12 +144,20 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
           end: s.endTime / 1000,
           en: s.primaryText,
           zh: s.secondaryText,
+          translations: s.translations,
           source_lang: language,
           is_placeholder: s.isPlaceholder,
         })),
         raw_text: subtitles.map(s => s.primaryText).join(' '),
         source_lang: language,
       });
+
+      // 把本地文件缓存到 IndexedDB，以便历史记录重放
+      try {
+        await saveFile(historyResult.id, pendingFile);
+      } catch (cacheErr) {
+        console.warn('Failed to cache local file:', cacheErr);
+      }
 
       setLoadingMsg('正在加载...');
       onLoad({
@@ -171,7 +182,7 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
     setLoadingMsg('正在获取视频字幕...');
 
     try {
-      const result = await generateSubtitles(videoUrl.trim(), language);
+      const result = await generateSubtitles(videoUrl.trim(), language, false);
       const subtitles = convertSubtitles(result.subtitles);
 
       const videoInfo: VideoInfo = {
@@ -187,7 +198,15 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
         title: videoInfo.title,
         source: videoUrl,
         duration: result.duration,
-        subtitles: result.subtitles,
+        subtitles: subtitles.map(s => ({
+          start: s.startTime / 1000,
+          end: s.endTime / 1000,
+          en: s.primaryText,
+          zh: s.secondaryText,
+          translations: s.translations,
+          source_lang: result.source_lang || language,
+          is_placeholder: s.isPlaceholder,
+        })),
         raw_text: result.raw_text || '',
         source_lang: result.source_lang || language,
       });
@@ -215,10 +234,28 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
       const record = await getHistory(item.id);
       const subtitles = convertSubtitles(record.subtitles || []);
 
+      let videoUrl = record.source;
+
+      // 本地文件需要从 IndexedDB 缓存中恢复
+      if (item.type === 'local') {
+        const cachedFile = await getFile(item.id);
+        if (cachedFile) {
+          videoUrl = URL.createObjectURL(cachedFile);
+        } else {
+          setPendingHistoryItem(item);
+          setLoading(false);
+          setLoadingMsg('');
+          setError('本地视频文件未缓存，请重新选择原文件以继续学习');
+          // 自动打开文件选择框
+          setTimeout(() => historyFileInputRef.current?.click(), 100);
+          return;
+        }
+      }
+
       const videoInfo: VideoInfo = {
         id: record.id,
         title: record.title,
-        videoUrl: record.source,
+        videoUrl,
         duration: Math.round(record.duration * 1000),
       };
 
@@ -234,6 +271,49 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
     } finally {
       setLoading(false);
       setLoadingMsg('');
+    }
+  };
+
+  const handleHistoryFileReSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingHistoryItem) return;
+
+    setLoading(true);
+    setError(null);
+    setLoadingMsg('正在加载本地文件...');
+
+    try {
+      const record = await getHistory(pendingHistoryItem.id);
+      const subtitles = convertSubtitles(record.subtitles || []);
+
+      // 重新缓存文件
+      try {
+        await saveFile(pendingHistoryItem.id, file);
+      } catch (cacheErr) {
+        console.warn('Failed to cache re-selected file:', cacheErr);
+      }
+
+      const videoUrl = URL.createObjectURL(file);
+      const videoInfo: VideoInfo = {
+        id: record.id,
+        title: record.title,
+        videoUrl,
+        duration: Math.round(record.duration * 1000),
+      };
+
+      onLoad({
+        video: videoInfo,
+        subtitles,
+        historyId: record.id,
+        progressSeconds: record.progress_seconds,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+      setLoadingMsg('');
+      setPendingHistoryItem(null);
+      e.target.value = '';
     }
   };
 
@@ -391,6 +471,13 @@ export function WelcomeScreen({ onLoad }: WelcomeScreenProps) {
                       accept=".srt,.vtt"
                       className="hidden"
                       onChange={(e) => e.target.files && setPendingSub(e.target.files[0])}
+                    />
+                    <input
+                      ref={historyFileInputRef}
+                      type="file"
+                      accept="audio/*,video/*"
+                      className="hidden"
+                      onChange={handleHistoryFileReSelect}
                     />
                   </div>
 

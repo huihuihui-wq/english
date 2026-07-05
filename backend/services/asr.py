@@ -324,35 +324,52 @@ def _apply_wav2vec2_fallback(
         return result
 
 
-def _run_whisper(wav_bytes: bytes, language: str) -> tuple[str, list[dict], list[dict]]:
+def _run_whisper(
+    wav_bytes: bytes,
+    language: str,
+    speech_segments: Optional[list[dict]] = None,
+) -> tuple[str, list[dict], list[dict]]:
     """Transcribe WAV audio with faster-whisper and return text + word timestamps.
 
-    For long audio, we split into fixed 30s windows with small overlap and
-    transcribe each window separately, then merge timestamps. This avoids the
-    timestamp drift that faster-whisper can accumulate on long-form audio.
+    For long audio, we prefer chunks aligned with VAD speech segments. VAD
+    boundaries act as anchor points: after chunked transcription, word timestamps
+    inside each VAD segment are linearly scaled to fit the segment exactly. This
+    corrects the cumulative drift that fixed-window chunking can introduce.
     """
     real_duration_ms = int(_get_real_audio_duration_bytes(wav_bytes, "wav") * 1000)
 
     # Short audio: transcribe in one pass
     if real_duration_ms <= 60000:
-        return _run_whisper_on_wav_bytes(wav_bytes, language, offset_ms=0)
+        text, words, segments = _run_whisper_on_wav_bytes(wav_bytes, language, offset_ms=0)
+        if speech_segments:
+            words = _calibrate_words_with_vad_anchors(words, speech_segments)
+            segments = _calibrate_segments_with_vad_anchors(segments, speech_segments)
+        return text, words, segments
 
-    # Long audio: fixed 30s windows with 500ms overlap
-    chunk_ms = 30000
-    overlap_ms = 500
-    chunks = []
-    start = 0
-    while start < real_duration_ms:
-        end = min(start + chunk_ms, real_duration_ms)
-        chunks.append((start, end))
-        if end == real_duration_ms:
-            break
-        start += chunk_ms - overlap_ms
+    # Long audio: prefer VAD-based chunks; fall back to fixed windows
+    if speech_segments:
+        chunks = _build_vad_chunks(speech_segments)
+        logger.info("Long audio: using %d VAD-based chunks for Whisper", len(chunks))
+    else:
+        chunk_ms = 30000
+        overlap_ms = 500
+        chunks = []
+        start = 0
+        while start < real_duration_ms:
+            end = min(start + chunk_ms, real_duration_ms)
+            chunks.append((start, end))
+            if end == real_duration_ms:
+                break
+            start += chunk_ms - overlap_ms
 
     if len(chunks) <= 1:
-        return _run_whisper_on_wav_bytes(wav_bytes, language, offset_ms=0)
+        text, words, segments = _run_whisper_on_wav_bytes(wav_bytes, language, offset_ms=0)
+        if speech_segments:
+            words = _calibrate_words_with_vad_anchors(words, speech_segments)
+            segments = _calibrate_segments_with_vad_anchors(segments, speech_segments)
+        return text, words, segments
 
-    logger.info("Long audio: splitting into %d fixed chunks for Whisper", len(chunks))
+    logger.info("Long audio: splitting into %d chunks for Whisper", len(chunks))
     all_words: list[dict] = []
     all_segments: list[dict] = []
     text_parts: list[str] = []
@@ -366,17 +383,166 @@ def _run_whisper(wav_bytes: bytes, language: str) -> tuple[str, list[dict], list
             text_parts.append(chunk_text)
         all_words.extend(chunk_words)
         all_segments.extend(chunk_segments)
-        logger.info("Chunk %d/%d: %d words, %d segments", chunk_idx + 1, len(chunks), len(chunk_words), len(chunk_segments))
+        logger.info(
+            "Chunk %d/%d: %d words, %d segments",
+            chunk_idx + 1, len(chunks), len(chunk_words), len(chunk_segments),
+        )
 
     # Merge words and segments, removing overlaps / duplicates near chunk boundaries
     all_words = _merge_chunk_words(all_words)
     all_segments = _merge_chunk_segments(all_segments)
+
+    # Global calibration using VAD anchors: scale each VAD speech segment so its
+    # first and last Whisper words align with the VAD boundaries.
+    if speech_segments:
+        all_words = _calibrate_words_with_vad_anchors(all_words, speech_segments)
+        all_segments = _calibrate_segments_with_vad_anchors(all_segments, speech_segments)
+        # Re-merge in case calibration created tiny overlaps
+        all_words = _merge_chunk_words(all_words)
+        all_segments = _merge_chunk_segments(all_segments)
+
     text = " ".join(text_parts).strip()
     logger.info(
         "Whisper chunked transcribe done: text_len=%d, words=%d, segments=%d",
         len(text), len(all_words), len(all_segments),
     )
     return text, all_words, all_segments
+
+
+def _calibrate_words_with_vad_anchors(
+    words: list[dict],
+    speech_segments: list[dict],
+) -> list[dict]:
+    """Scale word timestamps to fit VAD speech-segment boundaries.
+
+    Each VAD segment provides a reliable anchor [start_ms, end_ms]. Words whose
+    begin_time falls inside the segment are linearly mapped so the first and last
+    word touch the anchor boundaries. This removes cumulative drift from chunked
+    transcription without changing the relative spacing inside the segment.
+    """
+    if not words or not speech_segments:
+        return words
+
+    words = sorted(words, key=lambda w: w["begin_time"])
+    used: set[int] = set()
+    calibrated: list[dict] = []
+
+    for vad_seg in sorted(speech_segments, key=lambda s: s["start_ms"]):
+        vad_start = max(0, int(vad_seg["start_ms"]))
+        vad_end = max(vad_start, int(vad_seg["end_ms"]))
+
+        seg_indices = [
+            i for i, w in enumerate(words)
+            if vad_start <= w["begin_time"] <= vad_end and i not in used
+        ]
+        if not seg_indices:
+            continue
+
+        seg_words = [words[i] for i in seg_indices]
+        if len(seg_words) == 1:
+            w = dict(seg_words[0])
+            dur = max(50, w["end_time"] - w["begin_time"])
+            w["begin_time"] = vad_start
+            w["end_time"] = min(vad_start + dur, vad_end)
+            calibrated.append(w)
+            used.add(seg_indices[0])
+            continue
+
+        whisper_start = seg_words[0]["begin_time"]
+        whisper_end = seg_words[-1]["end_time"]
+        whisper_span = max(1, whisper_end - whisper_start)
+        vad_span = max(1, vad_end - vad_start)
+
+        for idx in seg_indices:
+            w = dict(words[idx])
+            w["begin_time"] = vad_start + int(
+                (w["begin_time"] - whisper_start) * vad_span / whisper_span
+            )
+            w["end_time"] = vad_start + int(
+                (w["end_time"] - whisper_start) * vad_span / whisper_span
+            )
+            w["begin_time"] = max(vad_start, min(w["begin_time"], vad_end))
+            w["end_time"] = max(w["begin_time"], min(w["end_time"], vad_end))
+            calibrated.append(w)
+            used.add(idx)
+
+    # Preserve any words that did not fall into a VAD segment
+    for i, w in enumerate(words):
+        if i not in used:
+            calibrated.append(dict(w))
+
+    return sorted(calibrated, key=lambda w: w["begin_time"])
+
+
+def _calibrate_segments_with_vad_anchors(
+    segments: list[dict],
+    speech_segments: list[dict],
+) -> list[dict]:
+    """Scale Whisper segment boundaries using VAD anchors, mirroring word calibration."""
+    if not segments or not speech_segments:
+        return segments
+
+    segments = sorted(segments, key=lambda s: s["start_ms"])
+    used: set[int] = set()
+    calibrated: list[dict] = []
+
+    for vad_seg in sorted(speech_segments, key=lambda s: s["start_ms"]):
+        vad_start = max(0, int(vad_seg["start_ms"]))
+        vad_end = max(vad_start, int(vad_seg["end_ms"]))
+
+        seg_indices = [
+            i for i, s in enumerate(segments)
+            if vad_start <= s["start_ms"] <= vad_end and i not in used
+        ]
+        if not seg_indices:
+            continue
+
+        seg_segs = [segments[i] for i in seg_indices]
+        if len(seg_segs) == 1:
+            s = dict(seg_segs[0])
+            s["start_ms"] = vad_start
+            s["end_ms"] = vad_end
+            calibrated.append(s)
+            used.add(seg_indices[0])
+            continue
+
+        whisper_start = seg_segs[0]["start_ms"]
+        whisper_end = seg_segs[-1]["end_ms"]
+        whisper_span = max(1, whisper_end - whisper_start)
+        vad_span = max(1, vad_end - vad_start)
+
+        for idx in seg_indices:
+            s = dict(segments[idx])
+            s["start_ms"] = vad_start + int(
+                (s["start_ms"] - whisper_start) * vad_span / whisper_span
+            )
+            s["end_ms"] = vad_start + int(
+                (s["end_ms"] - whisper_start) * vad_span / whisper_span
+            )
+            s["start_ms"] = max(vad_start, min(s["start_ms"], vad_end))
+            s["end_ms"] = max(s["start_ms"], min(s["end_ms"], vad_end))
+
+            if s.get("words"):
+                s["words"] = [
+                    {
+                        **w,
+                        "begin_time": vad_start + int(
+                            (w["begin_time"] - whisper_start) * vad_span / whisper_span
+                        ),
+                        "end_time": vad_start + int(
+                            (w["end_time"] - whisper_start) * vad_span / whisper_span
+                        ),
+                    }
+                    for w in s["words"]
+                ]
+            calibrated.append(s)
+            used.add(idx)
+
+    for i, s in enumerate(segments):
+        if i not in used:
+            calibrated.append(dict(s))
+
+    return sorted(calibrated, key=lambda s: s["start_ms"])
 
 
 def _build_vad_chunks(speech_segments: list[dict], max_chunk_ms: int = 30000, overlap_ms: int = 500) -> list[tuple[int, int]]:
@@ -675,9 +841,10 @@ async def transcribe_audio(
         None, run_vad_and_classify
     )
 
-    # Step 2: transcribe. For long audio, _run_whisper uses fixed 30s windows.
+    # Step 2: transcribe. For long audio, _run_whisper uses VAD-based chunks and
+    # calibrates word timestamps against VAD anchors to reduce cumulative drift.
     text, words, whisper_segments = await loop.run_in_executor(
-        None, _run_whisper, wav_bytes, language
+        None, _run_whisper, wav_bytes, language, speech_segments
     )
 
     result = {

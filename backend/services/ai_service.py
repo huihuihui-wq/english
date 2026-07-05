@@ -174,7 +174,7 @@ Rules:
 # Internal: API calls
 # ---------------------------------------------------------------------------
 async def _call_api(messages: list[dict], temperature: float = 0.7) -> dict:
-    """调用 DashScope 兼容 chat/completions 端点。"""
+    """调用 DashScope 兼容 chat/completions 端点（非流式）。"""
     if not API_KEY:
         raise RuntimeError("DASHSCOPE_API_KEY 未配置，请在 shadow-reader 后端 .env 或设置中填写")
 
@@ -197,6 +197,41 @@ async def _call_api(messages: list[dict], temperature: float = 0.7) -> dict:
         result = resp.json()
         content = result["choices"][0]["message"]["content"]
         return {"content": content, "model": result.get("model", MODEL)}
+
+
+async def _call_api_stream(messages: list[dict], temperature: float = 0.7):
+    """调用 DashScope 兼容 chat/completions 端点（SSE 流式）。
+
+    返回 (client, aiter_text) 元组，调用方负责在消费完成后调用 client.aclose()。
+    """
+    if not API_KEY:
+        raise RuntimeError("DASHSCOPE_API_KEY 未配置，请在 shadow-reader 后端 .env 或设置中填写")
+
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+
+    url = f"{BASE_URL}/chat/completions"
+    client = httpx.AsyncClient(timeout=60.0)
+    try:
+        resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code != 200:
+            text = await resp.aread()
+            await client.aclose()
+            logger.error("AI API stream error: %s %s", resp.status_code, text[:200])
+            raise RuntimeError(f"AI API stream error: {resp.status_code} {text[:200]}")
+        return client, resp.aiter_text()
+    except Exception:
+        await client.aclose()
+        raise
 
 
 def _clean_emoji_codes(text: str) -> str:
@@ -263,18 +298,82 @@ async def chat(message: str, context: str = "", history: list[dict] | None = Non
     messages.append({"role": "user", "content": message})
 
     res = await _call_api(messages, temperature=0.7)
-    
+
     # 清理 emoji 代码，防止 TTS 读出和前端显示
     reply_text = _clean_emoji_codes(res["content"])
-    
+
     # 生成语音
     audio_base64 = await _generate_tts(reply_text, voice=voice)
-    
+
     return {
         "reply": reply_text,
         "audio": audio_base64,
         "model": res["model"],
     }
+
+
+async def stream_chat(
+    message: str,
+    context: str = "",
+    history: list[dict] | None = None,
+    voice: str = "Cherry",
+):
+    """通用英语口语教练对话（SSE 流式），产出 SSE data 行内容。
+
+    生成器产出已格式化的字符串，调用方只需在前面加上 'data: ' 发送。
+    流结束后会额外产出一条 type=audio 的事件（如果 TTS 成功）。
+    """
+    messages: list[dict] = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+
+    if context:
+        ctx = context.strip()
+        if len(ctx) > 2000:
+            ctx = ctx[:2000] + "..."
+        messages.append({
+            "role": "system",
+            "content": f"Video context (subtitles): {ctx}",
+        })
+
+    messages.extend(_format_history(history))
+    messages.append({"role": "user", "content": message})
+
+    client = None
+    full_text = ""
+    try:
+        client, aiter_text = await _call_api_stream(messages, temperature=0.7)
+        async for chunk in aiter_text:
+            for line in chunk.splitlines():
+                line = line.strip()
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    return
+                try:
+                    parsed = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = parsed.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    cleaned = _clean_emoji_codes(content)
+                    full_text += cleaned
+                    yield json.dumps({"type": "delta", "content": cleaned}, ensure_ascii=False)
+    except Exception as e:
+        logger.exception("stream_chat failed")
+        yield json.dumps({"type": "error", "content": f"AI 流式响应失败: {e}"}, ensure_ascii=False)
+    finally:
+        if client is not None:
+            await client.aclose()
+
+    # 流式文本结束后生成完整语音
+    if full_text:
+        audio_base64 = await _generate_tts(full_text, voice=voice)
+        if audio_base64:
+            yield json.dumps({"type": "audio", "audio": audio_base64}, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

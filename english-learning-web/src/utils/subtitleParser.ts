@@ -43,6 +43,9 @@ export function parseSRT(content: string): SubtitleCue[] {
     
     const isPlaceholder = !primaryText.trim() || /^\[(Music|Applause|Silence|Sound|NOISE|MUSIC|APPLAUSE|SILENCE)\]$/i.test(primaryText.trim());
 
+    const translations: Record<string, string> = {};
+    if (secondaryText) translations['Chinese'] = secondaryText;
+
     cues.push({
       id: index + 1,
       startTime,
@@ -50,6 +53,7 @@ export function parseSRT(content: string): SubtitleCue[] {
       duration: endTime - startTime,
       primaryText,
       secondaryText,
+      translations,
       isPlaceholder,
     });
   });
